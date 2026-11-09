@@ -49,10 +49,10 @@ public class AnthropicAuthService : IAnthropicAuthService
 
     public async Task<OAuthTokens> StartInteractiveLoginAsync(CancellationToken cancellationToken = default)
     {
-        // 1. Generate PKCE verifier and challenge
-        var codeVerifier = GenerateRandomString(64);
+        // 1. Generate PKCE verifier (32 random bytes, base64url encoded = 43 chars)
+        var codeVerifier = GenerateRandomBytesBase64Url(32);
         var codeChallenge = GenerateCodeChallenge(codeVerifier);
-        var state = GenerateRandomString(32);
+        var state = GenerateRandomBytesBase64Url(32);
         int localPort = 54321;
         var redirectUri = $"http://localhost:{localPort}/callback";
 
@@ -79,14 +79,15 @@ public class AnthropicAuthService : IAnthropicAuthService
             throw new InvalidOperationException("OAuth state mismatch: potential CSRF attack detected.");
         }
 
-        // 3. Exchange code for tokens
+        // 3. Exchange code for tokens (matching Anthropic/Claude Code payload structure)
         var tokenRequest = new
         {
             grant_type = "authorization_code",
-            client_id = _clientId,
             code = code,
+            redirect_uri = redirectUri,
+            client_id = _clientId,
             code_verifier = codeVerifier,
-            redirect_uri = redirectUri
+            state = state
         };
 
         return await PostTokenExchangeAsync(tokenRequest, cancellationToken);
@@ -206,10 +207,15 @@ public class AnthropicAuthService : IAnthropicAuthService
 
     private async Task<OAuthTokens> PostTokenExchangeAsync(object requestPayload, CancellationToken cancellationToken)
     {
-        var content = new StringContent(JsonSerializer.Serialize(requestPayload), Encoding.UTF8, "application/json");
+        var jsonPayload = JsonSerializer.Serialize(requestPayload);
+        var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
         using var response = await _httpClient.PostAsync(_tokenEndpoint, content, cancellationToken);
 
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw new HttpRequestException($"Error durante el intercambio de token con Anthropic (HTTP {(int)response.StatusCode} {response.ReasonPhrase}): {errorBody}");
+        }
 
         var json = await response.Content.ReadAsStringAsync(cancellationToken);
         using var doc = JsonDocument.Parse(json);
@@ -231,7 +237,7 @@ public class AnthropicAuthService : IAnthropicAuthService
     private static async Task<(string code, string state)> ReceiveCodeViaHttpListenerAsync(int port, string expectedState, CancellationToken cancellationToken)
     {
         using var listener = new HttpListener();
-        listener.Prefixes.Add($"http://localhost:{port}/callback/");
+        listener.Prefixes.Add($"http://localhost:{port}/");
         listener.Start();
 
         using (cancellationToken.Register(() => listener.Stop()))
@@ -259,15 +265,23 @@ public class AnthropicAuthService : IAnthropicAuthService
         }
     }
 
-    private static string GenerateRandomString(int length)
+    private static string Base64UrlEncode(byte[] bytes)
     {
-        var bytes = RandomNumberGenerator.GetBytes(length);
-        return Convert.ToBase64String(bytes).Replace("+", "-").Replace("/", "_").TrimEnd('=')[..length];
+        return Convert.ToBase64String(bytes)
+            .Replace("+", "-")
+            .Replace("/", "_")
+            .Replace("=", "");
+    }
+
+    private static string GenerateRandomBytesBase64Url(int byteCount = 32)
+    {
+        var bytes = RandomNumberGenerator.GetBytes(byteCount);
+        return Base64UrlEncode(bytes);
     }
 
     private static string GenerateCodeChallenge(string codeVerifier)
     {
         var sha256 = SHA256.HashData(Encoding.ASCII.GetBytes(codeVerifier));
-        return Convert.ToBase64String(sha256).Replace("+", "-").Replace("/", "_").TrimEnd('=');
+        return Base64UrlEncode(sha256);
     }
 }

@@ -10,3 +10,4 @@ public interface IAnthropicAuthService
     Task<OAuthTokens?> RefreshTokensAsync(OAuthTokens currentTokens, CancellationToken cancellationToken = default);
     Task<OAuthTokens?> TryImportFromClaudeCliAsync(CancellationToken cancellationToken = default);
 }
+
