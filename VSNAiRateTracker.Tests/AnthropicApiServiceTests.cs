@@ -262,9 +262,12 @@ public class AnthropicApiServiceTests
 
         // Assert
         result.IsSuccess.Should().BeTrue();
-        result.PercentConsumed.Should().BeApproximately(34.0, 0.01);
-        result.CycleEnd.Should().Be(DateTimeOffset.Parse("2026-11-09T14:00:00.000Z"));
-        result.CycleStart.Should().Be(DateTimeOffset.Parse("2026-11-09T09:00:00.000Z"));
+        // Seven-day (weekly) utilization must be prioritized as the primary metric
+        result.PercentConsumed.Should().BeApproximately(25.0, 0.01);
+        result.SevenDayUtilization.Should().Be(25.0);
+        result.FiveHourUtilization.Should().Be(34.0);
+        result.CycleEnd.Should().Be(DateTimeOffset.Parse("2026-11-12T16:00:00.000Z"));
+        result.CycleStart.Should().Be(DateTimeOffset.Parse("2026-11-05T16:00:00.000Z"));
         handler.CallCount.Should().Be(1);
     }
 
@@ -430,6 +433,64 @@ public class AnthropicApiServiceTests
         result.IsSuccess.Should().BeTrue();
         result.PercentConsumed.Should().BeInRange(0.0, 100.0);
         result.CycleEnd.Should().BeAfter(result.CycleStart);
+    }
+
+    [Fact]
+    public async Task GetUsageAsync_WhenFullOAuthPayloadProvided_ParsesAllFieldsAndPrioritizesWeekly()
+    {
+        // Arrange
+        var tokens = new VSNAiRateTracker.Models.OAuthTokens { AccessToken = "valid-token" };
+        var json = """
+        {
+            "five_hour": {
+                "utilization": 2.0,
+                "resets_at": "2026-11-09T19:00:00.000Z"
+            },
+            "seven_day": {
+                "utilization": 30.0,
+                "resets_at": "2026-11-12T16:00:00.000Z"
+            },
+            "seven_day_opus": { "utilization": 5.0 },
+            "seven_day_sonnet": { "utilization": 28.0 },
+            "extra_usage": {
+                "is_enabled": true,
+                "utilization": 12.5,
+                "used_credits": 150.0,
+                "monthly_limit": 500.0,
+                "currency": "EUR"
+            },
+            "spend": {
+                "used": { "amount_minor": 1250, "currency": "EUR", "exponent": 2 },
+                "percent": 25.0
+            }
+        }
+        """;
+
+        var handler = new TestHttpMessageHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json")
+        }));
+        var sut = new AnthropicApiService(new HttpClient(handler));
+
+        // Act
+        var result = await sut.GetUsageAsync(apiKey: null, tokens: tokens);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.PercentConsumed.Should().Be(30.0); // 7-day primary
+        result.SevenDayUtilization.Should().Be(30.0);
+        result.FiveHourUtilization.Should().Be(2.0);
+        result.CycleEnd.Should().Be(DateTimeOffset.Parse("2026-11-12T16:00:00.000Z"));
+        result.CycleStart.Should().Be(DateTimeOffset.Parse("2026-11-05T16:00:00.000Z"));
+        result.SevenDayOpusUtilization.Should().Be(5.0);
+        result.SevenDaySonnetUtilization.Should().Be(28.0);
+        result.ExtraUsageEnabled.Should().BeTrue();
+        result.ExtraUsageUtilization.Should().Be(12.5);
+        result.ExtraUsageUsedCredits.Should().Be(150.0);
+        result.ExtraUsageMonthlyLimit.Should().Be(500.0);
+        result.Currency.Should().Be("EUR");
+        result.SpendUsedAmount.Should().Be(12.50);
+        result.SpendPercent.Should().Be(25.0);
     }
 }
 

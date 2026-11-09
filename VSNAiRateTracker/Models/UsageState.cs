@@ -47,9 +47,17 @@ public class UsageState
         get
         {
             if (DeltaHours > 0)
+            {
+                if (Math.Abs(DeltaHours) >= 10.0)
+                    return $"+{DeltaHours:F0}";
                 return $"+{DeltaHours:F1}";
+            }
             if (DeltaHours < 0)
+            {
+                if (Math.Abs(DeltaHours) >= 10.0)
+                    return $"{DeltaHours:F0}";
                 return $"{DeltaHours:F1}";
+            }
             return "0.0";
         }
     }

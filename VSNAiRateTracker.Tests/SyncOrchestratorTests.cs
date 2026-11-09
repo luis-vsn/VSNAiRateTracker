@@ -203,7 +203,7 @@ public class SyncOrchestratorTests
 
         // Assert
         _trayMock.Verify(t => t.UpdateState(calculatedState), Times.Once);
-        _telemetryMock.Verify(t => t.RecordUsageSync(40.0, 3.5, RateStatus.WarningFast, It.IsAny<long>()), Times.Once);
+        _telemetryMock.Verify(t => t.RecordUsageSync(apiResult, calculatedState, It.IsAny<long>()), Times.Once);
     }
 
     [Fact]

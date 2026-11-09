@@ -59,6 +59,34 @@ public class IconRendererServiceTests
     }
 
     [Fact]
+    public void RenderBadgeBitmap_MaximizesCanvasUsageForTaskbarLegibility()
+    {
+        using var bitmap = _sut.RenderBadgeBitmap("+0.2", "#2ECC71", 64);
+
+        int minX = 64, maxX = 0, minY = 64, maxY = 0;
+        for (int y = 0; y < 64; y++)
+        {
+            for (int x = 0; x < 64; x++)
+            {
+                if (bitmap.GetPixel(x, y).Alpha > 10)
+                {
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+                }
+            }
+        }
+
+        int contentWidth = maxX - minX + 1;
+        int contentHeight = maxY - minY + 1;
+
+        // Content must occupy the vast majority of the 64x64 canvas to be clearly visible in Windows tray
+        contentWidth.Should().BeGreaterThanOrEqualTo(45); // >= 70% of 64px
+        contentHeight.Should().BeGreaterThanOrEqualTo(25); // >= 40% of 64px
+    }
+
+    [Fact]
     public void RenderBadgePngBytes_GeneratesValidPngData()
     {
         var bytes = _sut.RenderBadgePngBytes("-0.1", "#3498DB", 64);

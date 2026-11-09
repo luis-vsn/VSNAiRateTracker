@@ -169,12 +169,22 @@ public class SyncOrchestrator : ISyncOrchestrator
                 config.Thresholds);
 
             sw.Stop();
-            _telemetryService?.RecordUsageSync(result.PercentConsumed, usageState.DeltaHours, usageState.Status, sw.ElapsedMilliseconds);
-            _telemetryService?.LogInfo($"Sincronización completada: {result.PercentConsumed:F0}% consumido, desfase {usageState.DeltaHours:F1}h ({usageState.StatusDescription})");
+            _telemetryService?.RecordUsageSync(result, usageState, sw.ElapsedMilliseconds);
+            
+            var fiveHourInfo = result.FiveHourUtilization.HasValue ? $", 5h: {result.FiveHourUtilization.Value:F0}%" : string.Empty;
+            _telemetryService?.LogInfo($"Sincronización completada: Semanal {result.PercentConsumed:F0}% (desfase {usageState.DeltaHours:F1}h, {usageState.StatusDescription}){fiveHourInfo}");
 
             cycleSpan?.SetTag("vsn.delta_hours", usageState.DeltaHours);
             cycleSpan?.SetTag("vsn.status", usageState.Status.ToString());
             cycleSpan?.SetTag("anthropic.percent_consumed", result.PercentConsumed);
+            if (result.SevenDayUtilization.HasValue)
+            {
+                cycleSpan?.SetTag("anthropic.seven_day_percent", result.SevenDayUtilization.Value);
+            }
+            if (result.FiveHourUtilization.HasValue)
+            {
+                cycleSpan?.SetTag("anthropic.five_hour_percent", result.FiveHourUtilization.Value);
+            }
 
             _trayManager.UpdateState(usageState);
             _telemetryService?.ForceFlush();

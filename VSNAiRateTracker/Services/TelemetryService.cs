@@ -34,6 +34,21 @@ public class TelemetryService : ITelemetryService
     private double _lastPercentConsumed;
     private double _lastDeltaHours;
     private int _lastStatusValue;
+    private double _lastTotalWorkHours;
+    private double _lastElapsedWorkHours;
+    private double _lastExpectedRatioPercent;
+
+    private double _lastSevenDayUtilization;
+    private double _lastSevenDayResetsInHours;
+    private double _lastFiveHourUtilization;
+    private double _lastFiveHourResetsInHours;
+    private double _lastSevenDayOpusUtilization;
+    private double _lastSevenDaySonnetUtilization;
+    private double _lastExtraUsageEnabled;
+    private double _lastExtraUsageUtilization;
+    private double _lastExtraUsageUsedCredits;
+    private double _lastSpendUsedAmount;
+    private double _lastSpendPercent;
 
     private bool _isEnabled;
     private bool _isDisposed;
@@ -49,9 +64,28 @@ public class TelemetryService : ITelemetryService
         _syncDuration = _meter.CreateHistogram<long>("vsn.rate_tracker.sync.duration_ms", "ms", "Duration of sync cycle");
         _apiDuration = _meter.CreateHistogram<long>("vsn.rate_tracker.api.duration_ms", "ms", "Duration of Anthropic API call");
 
-        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.utilization_percent", () => _lastPercentConsumed, "%", "Current Anthropic quota utilization percent");
+        // Primary Rate Tracker burndown gauges
+        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.utilization_percent", () => _lastPercentConsumed, "%", "Current primary rate tracker quota utilization percent");
         _meter.CreateObservableGauge("vsn.rate_tracker.delta_hours", () => _lastDeltaHours, "hours", "Difference between quota spent and working hours elapsed");
         _meter.CreateObservableGauge("vsn.rate_tracker.status_code", () => _lastStatusValue, description: "Current rate status: 0=Optimal, 1=WarningFast, 2=DangerFast, 3=Slow");
+        _meter.CreateObservableGauge("vsn.rate_tracker.total_work_hours", () => _lastTotalWorkHours, "hours", "Total working hours scheduled in the cycle");
+        _meter.CreateObservableGauge("vsn.rate_tracker.elapsed_work_hours", () => _lastElapsedWorkHours, "hours", "Elapsed working hours in the cycle");
+        _meter.CreateObservableGauge("vsn.rate_tracker.expected_ratio_percent", () => _lastExpectedRatioPercent, "%", "Expected quota consumption percentage based on elapsed working hours");
+
+        // Anthropic detailed multi-window metrics
+        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.seven_day_utilization_percent", () => _lastSevenDayUtilization, "%", "Anthropic 7-day rolling window utilization percent");
+        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.seven_day_resets_in_hours", () => _lastSevenDayResetsInHours, "hours", "Hours remaining until Anthropic 7-day reset");
+        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.five_hour_utilization_percent", () => _lastFiveHourUtilization, "%", "Anthropic 5-hour window utilization percent");
+        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.five_hour_resets_in_hours", () => _lastFiveHourResetsInHours, "hours", "Hours remaining until Anthropic 5-hour reset");
+        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.seven_day_opus_utilization_percent", () => _lastSevenDayOpusUtilization, "%", "Anthropic 7-day Opus utilization percent");
+        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.seven_day_sonnet_utilization_percent", () => _lastSevenDaySonnetUtilization, "%", "Anthropic 7-day Sonnet utilization percent");
+
+        // Anthropic extra usage & spend
+        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.extra_usage_enabled", () => _lastExtraUsageEnabled, description: "1 if extra usage credits are enabled, 0 otherwise");
+        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.extra_usage_utilization_percent", () => _lastExtraUsageUtilization, "%", "Extra usage credit utilization percent");
+        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.extra_usage_used_credits", () => _lastExtraUsageUsedCredits, description: "Extra usage credits used");
+        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.spend_used_amount", () => _lastSpendUsedAmount, description: "Spend budget amount used");
+        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.spend_percent", () => _lastSpendPercent, "%", "Spend budget percentage used");
     }
 
     public void Initialize(TelemetryConfig config)
@@ -233,17 +267,76 @@ public class TelemetryService : ITelemetryService
         }
     }
 
+    public void RecordUsageSync(AnthropicUsageResult usageResult, UsageState usageState, long durationMs)
+    {
+        ArgumentNullException.ThrowIfNull(usageResult);
+        ArgumentNullException.ThrowIfNull(usageState);
+
+        _lastPercentConsumed = usageResult.PercentConsumed;
+        _lastDeltaHours = usageState.DeltaHours;
+        _lastStatusValue = (int)usageState.Status;
+        _lastTotalWorkHours = usageState.TotalWorkHours;
+        _lastElapsedWorkHours = usageState.ElapsedWorkHours;
+        _lastExpectedRatioPercent = usageState.ExpectedRatio * 100.0;
+
+        _lastSevenDayUtilization = usageResult.SevenDayUtilization ?? usageResult.PercentConsumed;
+        if (usageResult.SevenDayResetsAt.HasValue)
+        {
+            _lastSevenDayResetsInHours = Math.Max(0, (usageResult.SevenDayResetsAt.Value - DateTimeOffset.UtcNow).TotalHours);
+        }
+        _lastFiveHourUtilization = usageResult.FiveHourUtilization ?? 0.0;
+        if (usageResult.FiveHourResetsAt.HasValue)
+        {
+            _lastFiveHourResetsInHours = Math.Max(0, (usageResult.FiveHourResetsAt.Value - DateTimeOffset.UtcNow).TotalHours);
+        }
+
+        _lastSevenDayOpusUtilization = usageResult.SevenDayOpusUtilization ?? 0.0;
+        _lastSevenDaySonnetUtilization = usageResult.SevenDaySonnetUtilization ?? 0.0;
+
+        _lastExtraUsageEnabled = (usageResult.ExtraUsageEnabled == true) ? 1.0 : 0.0;
+        _lastExtraUsageUtilization = usageResult.ExtraUsageUtilization ?? 0.0;
+        _lastExtraUsageUsedCredits = usageResult.ExtraUsageUsedCredits ?? 0.0;
+        _lastSpendUsedAmount = usageResult.SpendUsedAmount ?? 0.0;
+        _lastSpendPercent = usageResult.SpendPercent ?? 0.0;
+
+        _syncCounter.Add(1, new KeyValuePair<string, object?>("status", usageState.Status.ToString()));
+        _syncDuration.Record(durationMs);
+
+        using var activity = _activitySource.StartActivity("SyncUsageCycle");
+        activity?.SetTag("anthropic.percent_consumed", usageResult.PercentConsumed);
+        activity?.SetTag("anthropic.seven_day_utilization", _lastSevenDayUtilization);
+        activity?.SetTag("anthropic.seven_day_resets_in_hours", _lastSevenDayResetsInHours);
+        activity?.SetTag("anthropic.five_hour_utilization", _lastFiveHourUtilization);
+        activity?.SetTag("anthropic.five_hour_resets_in_hours", _lastFiveHourResetsInHours);
+        activity?.SetTag("vsn.delta_hours", usageState.DeltaHours);
+        activity?.SetTag("vsn.total_work_hours", usageState.TotalWorkHours);
+        activity?.SetTag("vsn.elapsed_work_hours", usageState.ElapsedWorkHours);
+        activity?.SetTag("vsn.expected_ratio_percent", _lastExpectedRatioPercent);
+        activity?.SetTag("vsn.status", usageState.Status.ToString());
+
+        if (usageResult.ExtraUsageEnabled.HasValue)
+        {
+            activity?.SetTag("anthropic.extra_usage_enabled", usageResult.ExtraUsageEnabled.Value);
+        }
+        if (usageResult.SpendUsedAmount.HasValue)
+        {
+            activity?.SetTag("anthropic.spend_used_amount", usageResult.SpendUsedAmount.Value);
+        }
+    }
+
     public void RecordUsageSync(double percentConsumed, double deltaHours, RateStatus status, long durationMs)
     {
         _lastPercentConsumed = percentConsumed;
         _lastDeltaHours = deltaHours;
         _lastStatusValue = (int)status;
+        _lastSevenDayUtilization = percentConsumed;
 
         _syncCounter.Add(1, new KeyValuePair<string, object?>("status", status.ToString()));
         _syncDuration.Record(durationMs);
 
         using var activity = _activitySource.StartActivity("SyncUsageCycle");
         activity?.SetTag("anthropic.percent_consumed", percentConsumed);
+        activity?.SetTag("anthropic.seven_day_utilization", percentConsumed);
         activity?.SetTag("vsn.delta_hours", deltaHours);
         activity?.SetTag("vsn.status", status.ToString());
     }

@@ -63,25 +63,44 @@ public class IconRendererService : IIconRendererService
                 color = parsedColor;
             }
 
-            // Direct numerical hourly value rendered cleanly in the defined status color (no circular background)
-            float fontScale = text.Length switch
+            var displayText = text ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(displayText))
             {
-                <= 2 => 0.52f,
-                3 => 0.44f,
-                4 => 0.38f,
-                _ => 0.32f
-            };
+                displayText = "0";
+            }
 
-            using var typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyleWeight.Bold, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright);
-            using var font = new SKFont(typeface, size * fontScale);
+            // Ultra-bold sans-serif font for maximum legibility in the system tray
+            using var typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyleWeight.Black, SKFontStyleWidth.Condensed, SKFontStyleSlant.Upright)
+                ?? SKTypeface.FromFamilyName("Arial", SKFontStyleWeight.Bold, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright)
+                ?? SKTypeface.Default;
+
+            // Target filling almost the entire canvas: 96% of width, 92% of height
+            float targetW = size * 0.96f;
+            float targetH = size * 0.92f;
+
+            // Dynamically scale font size so glyphs fill the maximum possible space
+            float testFontSize = 32f;
+            using var testFont = new SKFont(typeface, testFontSize);
+            using var testPaint = new SKPaint { IsAntialias = true };
+            testFont.MeasureText(displayText, out var initialBounds, testPaint);
+
+            float calculatedFontSize = testFontSize;
+            if (initialBounds.Width > 0 && initialBounds.Height > 0)
+            {
+                float scaleX = targetW / initialBounds.Width;
+                float scaleY = targetH / initialBounds.Height;
+                calculatedFontSize = testFontSize * Math.Min(scaleX, scaleY);
+            }
+
+            using var font = new SKFont(typeface, calculatedFontSize);
 
             // Subtle dark contrast outline to guarantee sharpness on both light and dark system trays
             using var outlinePaint = new SKPaint
             {
-                Color = new SKColor(0, 0, 0, 160),
+                Color = new SKColor(0, 0, 0, 210),
                 IsAntialias = true,
                 Style = SKPaintStyle.Stroke,
-                StrokeWidth = Math.Max(1.5f, size * 0.035f)
+                StrokeWidth = Math.Max(1.5f, size * 0.045f)
             };
 
             using var textPaint = new SKPaint
@@ -91,12 +110,13 @@ public class IconRendererService : IIconRendererService
                 Style = SKPaintStyle.Fill
             };
 
-            font.MeasureText(text, out var textBounds, textPaint);
-            float x = size / 2f;
+            font.MeasureText(displayText, out var textBounds, textPaint);
+            // Center the actual bounding box directly in the middle of the icon canvas
+            float x = (size / 2f) - textBounds.MidX;
             float y = (size / 2f) - textBounds.MidY;
 
-            canvas.DrawText(text, x, y, SKTextAlign.Center, font, outlinePaint);
-            canvas.DrawText(text, x, y, SKTextAlign.Center, font, textPaint);
+            canvas.DrawText(displayText, x, y, SKTextAlign.Left, font, outlinePaint);
+            canvas.DrawText(displayText, x, y, SKTextAlign.Left, font, textPaint);
         }
 
         return bitmap;

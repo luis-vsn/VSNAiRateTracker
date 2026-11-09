@@ -171,40 +171,158 @@ public class AnthropicApiService : IAnthropicApiService
         var root = doc.RootElement;
 
         double percentConsumed = 0.0;
-        DateTimeOffset cycleEnd = DateTimeOffset.UtcNow.AddHours(5);
-        DateTimeOffset cycleStart = DateTimeOffset.UtcNow;
+        DateTimeOffset cycleEnd = DateTimeOffset.UtcNow.AddDays(7);
+        DateTimeOffset cycleStart = cycleEnd.AddDays(-7);
 
-        if (root.TryGetProperty("five_hour", out var fiveHour) &&
-            fiveHour.ValueKind == JsonValueKind.Object &&
-            fiveHour.TryGetProperty("utilization", out var utilProp) &&
-            utilProp.ValueKind == JsonValueKind.Number)
+        // 1. Extract five_hour details
+        double? fiveHourUtil = null;
+        DateTimeOffset? fiveHourReset = null;
+        if (root.TryGetProperty("five_hour", out var fiveHour) && fiveHour.ValueKind == JsonValueKind.Object)
         {
-            percentConsumed = utilProp.GetDouble();
+            if (fiveHour.TryGetProperty("utilization", out var utilProp) && utilProp.ValueKind == JsonValueKind.Number)
+            {
+                fiveHourUtil = utilProp.GetDouble();
+            }
             if (fiveHour.TryGetProperty("resets_at", out var resetsAtProp) &&
                 resetsAtProp.ValueKind == JsonValueKind.String &&
-                DateTimeOffset.TryParse(resetsAtProp.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsedEnd))
+                DateTimeOffset.TryParse(resetsAtProp.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed5hEnd))
             {
-                cycleEnd = parsedEnd;
-                cycleStart = cycleEnd.AddHours(-5);
+                fiveHourReset = parsed5hEnd;
             }
         }
-        else if (root.TryGetProperty("seven_day", out var sevenDay) &&
-                 sevenDay.ValueKind == JsonValueKind.Object &&
-                 sevenDay.TryGetProperty("utilization", out var sevenUtilProp) &&
-                 sevenUtilProp.ValueKind == JsonValueKind.Number)
+
+        // 2. Extract seven_day (weekly) details
+        double? sevenDayUtil = null;
+        DateTimeOffset? sevenDayReset = null;
+        if (root.TryGetProperty("seven_day", out var sevenDay) && sevenDay.ValueKind == JsonValueKind.Object)
         {
-            percentConsumed = sevenUtilProp.GetDouble();
-            if (sevenDay.TryGetProperty("resets_at", out var resetsAtProp) &&
-                resetsAtProp.ValueKind == JsonValueKind.String &&
-                DateTimeOffset.TryParse(resetsAtProp.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsedEnd))
+            if (sevenDay.TryGetProperty("utilization", out var sUtilProp) && sUtilProp.ValueKind == JsonValueKind.Number)
             {
-                cycleEnd = parsedEnd;
-                cycleStart = cycleEnd.AddDays(-7);
+                sevenDayUtil = sUtilProp.GetDouble();
+            }
+            if (sevenDay.TryGetProperty("resets_at", out var sResetsAtProp) &&
+                sResetsAtProp.ValueKind == JsonValueKind.String &&
+                DateTimeOffset.TryParse(sResetsAtProp.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed7dEnd))
+            {
+                sevenDayReset = parsed7dEnd;
             }
         }
-        else if (root.TryGetProperty("limits", out var limits) && limits.ValueKind == JsonValueKind.Array)
+
+        // 3. Check model-specific limits (opus, sonnet)
+        double? sevenDayOpusUtil = null;
+        if (root.TryGetProperty("seven_day_opus", out var sevenDayOpus) &&
+            sevenDayOpus.ValueKind == JsonValueKind.Object &&
+            sevenDayOpus.TryGetProperty("utilization", out var opusProp) &&
+            opusProp.ValueKind == JsonValueKind.Number)
+        {
+            sevenDayOpusUtil = opusProp.GetDouble();
+        }
+
+        double? sevenDaySonnetUtil = null;
+        if (root.TryGetProperty("seven_day_sonnet", out var sevenDaySonnet) &&
+            sevenDaySonnet.ValueKind == JsonValueKind.Object &&
+            sevenDaySonnet.TryGetProperty("utilization", out var sonnetProp) &&
+            sonnetProp.ValueKind == JsonValueKind.Number)
+        {
+            sevenDaySonnetUtil = sonnetProp.GetDouble();
+        }
+
+        // 4. Extract extra_usage
+        bool? extraEnabled = null;
+        double? extraUtil = null;
+        double? extraUsedCredits = null;
+        double? extraMonthlyLimit = null;
+        string? currency = null;
+        if (root.TryGetProperty("extra_usage", out var extra) && extra.ValueKind == JsonValueKind.Object)
+        {
+            if (extra.TryGetProperty("is_enabled", out var enabledProp))
+            {
+                extraEnabled = enabledProp.ValueKind == JsonValueKind.True;
+            }
+            if (extra.TryGetProperty("utilization", out var extraUtilProp) && extraUtilProp.ValueKind == JsonValueKind.Number)
+            {
+                extraUtil = extraUtilProp.GetDouble();
+            }
+            if (extra.TryGetProperty("used_credits", out var usedProp) && usedProp.ValueKind == JsonValueKind.Number)
+            {
+                extraUsedCredits = usedProp.GetDouble();
+            }
+            if (extra.TryGetProperty("monthly_limit", out var monthlyLimitProp) && monthlyLimitProp.ValueKind == JsonValueKind.Number)
+            {
+                extraMonthlyLimit = monthlyLimitProp.GetDouble();
+            }
+            if (extra.TryGetProperty("currency", out var currProp) && currProp.ValueKind == JsonValueKind.String)
+            {
+                currency = currProp.GetString();
+            }
+        }
+
+        // 5. Extract spend
+        double? spendUsed = null;
+        double? spendPercent = null;
+        if (root.TryGetProperty("spend", out var spend) && spend.ValueKind == JsonValueKind.Object)
+        {
+            if (spend.TryGetProperty("percent", out var spendPctProp) && spendPctProp.ValueKind == JsonValueKind.Number)
+            {
+                spendPercent = spendPctProp.GetDouble();
+            }
+            if (spend.TryGetProperty("used", out var usedObj) && usedObj.ValueKind == JsonValueKind.Object &&
+                usedObj.TryGetProperty("amount_minor", out var minorProp) && minorProp.ValueKind == JsonValueKind.Number)
+            {
+                var minor = minorProp.GetInt64();
+                int exp = 2;
+                if (usedObj.TryGetProperty("exponent", out var expProp) && expProp.ValueKind == JsonValueKind.Number)
+                {
+                    exp = expProp.GetInt32();
+                }
+                spendUsed = minor / Math.Pow(10, exp);
+            }
+        }
+
+        // 6. Check limits array if sevenDay was not present directly in root
+        if (!sevenDayUtil.HasValue && root.TryGetProperty("limits", out var limits) && limits.ValueKind == JsonValueKind.Array)
         {
             foreach (var limit in limits.EnumerateArray())
+            {
+                var group = limit.TryGetProperty("group", out var gProp) ? gProp.GetString() : null;
+                var kind = limit.TryGetProperty("kind", out var kProp) ? kProp.GetString() : null;
+                if (string.Equals(group, "weekly", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(kind, "weekly_all", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(kind, "seven_day", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (limit.TryGetProperty("percent", out var pctProp) && pctProp.ValueKind == JsonValueKind.Number)
+                    {
+                        sevenDayUtil = pctProp.GetDouble();
+                    }
+                    if (limit.TryGetProperty("resets_at", out var rProp) && rProp.ValueKind == JsonValueKind.String &&
+                        DateTimeOffset.TryParse(rProp.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var pEnd))
+                    {
+                        sevenDayReset = pEnd;
+                    }
+                    break;
+                }
+            }
+        }
+
+        // PRIMARY BURNDOWN RATE DECISION:
+        // Priority 1: Weekly (seven_day) total limit and its exact reset time
+        if (sevenDayUtil.HasValue)
+        {
+            percentConsumed = sevenDayUtil.Value;
+            cycleEnd = sevenDayReset ?? DateTimeOffset.UtcNow.AddDays(7);
+            cycleStart = cycleEnd.AddDays(-7);
+        }
+        // Priority 2: Five hour window if weekly limit is not provided
+        else if (fiveHourUtil.HasValue)
+        {
+            percentConsumed = fiveHourUtil.Value;
+            cycleEnd = fiveHourReset ?? DateTimeOffset.UtcNow.AddHours(5);
+            cycleStart = cycleEnd.AddHours(-5);
+        }
+        // Priority 3: Fallback to any limit in limits array
+        else if (root.TryGetProperty("limits", out var fallbackLimits) && fallbackLimits.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var limit in fallbackLimits.EnumerateArray())
             {
                 if (limit.TryGetProperty("percent", out var pctProp) && pctProp.ValueKind == JsonValueKind.Number)
                 {
@@ -222,7 +340,23 @@ public class AnthropicApiService : IAnthropicApiService
         }
 
         percentConsumed = Math.Clamp(percentConsumed, 0.0, 100.0);
-        return AnthropicUsageResult.Success(percentConsumed, cycleStart, cycleEnd);
+        return AnthropicUsageResult.Success(
+            percentConsumed,
+            cycleStart,
+            cycleEnd,
+            fiveHourUtilization: fiveHourUtil,
+            fiveHourResetsAt: fiveHourReset,
+            sevenDayUtilization: sevenDayUtil,
+            sevenDayResetsAt: sevenDayReset,
+            sevenDayOpusUtilization: sevenDayOpusUtil,
+            sevenDaySonnetUtilization: sevenDaySonnetUtil,
+            extraUsageEnabled: extraEnabled,
+            extraUsageUtilization: extraUtil,
+            extraUsageUsedCredits: extraUsedCredits,
+            extraUsageMonthlyLimit: extraMonthlyLimit,
+            spendUsedAmount: spendUsed,
+            spendPercent: spendPercent,
+            currency: currency);
     }
 
     private static AnthropicUsageResult ParseSuccessfulResponse(HttpResponseMessage response)
