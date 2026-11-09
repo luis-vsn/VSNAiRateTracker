@@ -47,14 +47,14 @@ jobs:
 
     - name: Upload Windows Installer
       if: matrix.os == 'windows-latest'
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         name: windows-installer
         path: packaging/dist/*Setup*.exe
 
     - name: Upload Windows Portable Package
       if: matrix.os == 'windows-latest'
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         name: windows-portable
         path: packaging/dist/*portable*.zip
@@ -67,7 +67,7 @@ jobs:
 
     - name: Upload macOS Artifacts
       if: matrix.os == 'macos-latest'
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         name: macos-dmg
         path: packaging/dist/*.dmg
