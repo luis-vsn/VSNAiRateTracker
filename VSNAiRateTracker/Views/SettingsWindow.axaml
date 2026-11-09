@@ -3,11 +3,11 @@
         xmlns:vm="using:VSNAiRateTracker.ViewModels"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        mc:Ignorable="d" d:DesignWidth="680" d:DesignHeight="840"
+        mc:Ignorable="d" d:DesignWidth="680" d:DesignHeight="880"
         x:Class="VSNAiRateTracker.Views.SettingsWindow"
         x:DataType="vm:SettingsViewModel"
-        Title="VSNAiRateTracker - Configuración"
-        Width="680" Height="840"
+        Title="{Binding [App.Title]}"
+        Width="680" Height="880"
         MinWidth="640" MinHeight="700"
         CanResize="True"
         WindowStartupLocation="CenterScreen">
@@ -15,10 +15,10 @@
     <Grid RowDefinitions="Auto,*,Auto" Margin="24">
         <!-- Header -->
         <StackPanel Grid.Row="0" Spacing="6" Margin="0,0,0,16">
-            <TextBlock Text="Configuración de VSNAiRateTracker"
+            <TextBlock Text="{Binding [App.Title]}"
                        FontSize="20"
                        FontWeight="SemiBold" />
-            <TextBlock Text="Monitoriza en tiempo real tu consumo de cuota de Anthropic respecto a tu jornada laboral."
+            <TextBlock Text="{Binding [Nav.AuthDesc]}"
                        FontSize="12"
                        Foreground="{DynamicResource SystemBaseMediumColor}" />
         </StackPanel>
@@ -26,17 +26,36 @@
         <!-- Form content -->
         <ScrollViewer Grid.Row="1">
             <StackPanel Spacing="16" Margin="0,0,12,0">
+
+                <!-- Section 0: Language Selection -->
+                <Border BorderBrush="{DynamicResource SystemBaseLowColor}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="14">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding [Nav.Language]}" FontWeight="SemiBold" FontSize="13" />
+                            <TextBlock Text="{Binding [Nav.LanguageDesc]}" FontSize="11" Foreground="{DynamicResource SystemBaseMediumColor}" />
+                        </StackPanel>
+                        <ComboBox Grid.Column="1"
+                                  ItemsSource="{Binding AvailableLanguages}"
+                                  SelectedItem="{Binding SelectedLanguage, Mode=TwoWay}"
+                                  MinWidth="140"
+                                  VerticalAlignment="Center" />
+                    </Grid>
+                </Border>
+
                 <!-- Section 1: Anthropic Web Signing / OAuth -->
                 <Border BorderBrush="{DynamicResource SystemAccentColor}"
                         BorderThickness="1.5"
                         CornerRadius="8"
                         Padding="16">
                     <StackPanel Spacing="10">
-                        <TextBlock Text="Autenticación Web de Anthropic"
+                        <TextBlock Text="{Binding [Auth.WebSection]}"
                                    FontWeight="SemiBold"
                                    FontSize="14" />
 
-                        <TextBlock Text="Inicia sesión directamente con tu cuenta de Anthropic para obtener los tokens de acceso y renovación automática."
+                        <TextBlock Text="{Binding [Auth.WebHelp]}"
                                    FontSize="11"
                                    TextWrapping="Wrap"
                                    Foreground="{DynamicResource SystemBaseMediumColor}" />
@@ -52,18 +71,18 @@
 
                         <!-- Action buttons with WrapPanel to prevent truncation -->
                         <WrapPanel Orientation="Horizontal" Margin="0,4,0,0">
-                            <Button Content="Iniciar sesión con Anthropic (Web)"
+                            <Button Content="{Binding [Auth.BtnSignIn]}"
                                     Classes="accent"
                                     Click="OnLoginWithWebClick"
                                     IsEnabled="{Binding !IsLoggingIn}"
                                     Margin="0,0,8,8" />
 
-                            <Button Content="Importar de Claude Code"
+                            <Button Content="{Binding [Auth.BtnImport]}"
                                     Click="OnImportClaudeClick"
                                     IsEnabled="{Binding !IsLoggingIn}"
                                     Margin="0,0,8,8" />
 
-                            <Button Content="Cerrar sesión"
+                            <Button Content="{Binding [Auth.BtnSignOut]}"
                                     Click="OnLogoutWebClick"
                                     IsVisible="{Binding IsLoggedInWithWeb}"
                                     Margin="0,0,8,8" />
@@ -77,11 +96,11 @@
                         CornerRadius="8"
                         Padding="16">
                     <StackPanel Spacing="10">
-                        <TextBlock Text="Método alternativo: API Key estática"
+                        <TextBlock Text="{Binding [Auth.ManualSection]}"
                                    FontWeight="SemiBold"
                                    FontSize="13" />
 
-                        <TextBlock Text="Si tu cuenta dispone de una API Key tradicional de Anthropic, puedes configurarla aquí."
+                        <TextBlock Text="{Binding [Auth.ApiKeyPlaceholder]}"
                                    FontSize="11"
                                    Foreground="{DynamicResource SystemBaseMediumColor}" />
 
@@ -92,7 +111,7 @@
                                      PlaceholderText="sk-ant-..."
                                      VerticalAlignment="Center" />
                             <Button Grid.Column="1"
-                                     Content="Probar Conexión"
+                                     Content="{Binding [Auth.BtnTest]}"
                                      Margin="8,0,0,0"
                                      Click="OnTestConnectionClick"
                                      IsEnabled="{Binding !IsTestingConnection}"
@@ -112,11 +131,11 @@
                         CornerRadius="8"
                         Padding="16">
                     <StackPanel Spacing="10">
-                        <TextBlock Text="Horario Laboral Semanal por Días"
+                        <TextBlock Text="{Binding [Nav.Schedule]}"
                                    FontWeight="SemiBold"
                                    FontSize="14" />
 
-                        <TextBlock Text="Configura de forma independiente cada día de la semana para reflejar tu jornada real."
+                        <TextBlock Text="{Binding [Nav.ScheduleDesc]}"
                                    FontSize="11"
                                    Foreground="{DynamicResource SystemBaseMediumColor}" />
 
@@ -168,18 +187,18 @@
                         CornerRadius="8"
                         Padding="16">
                     <StackPanel Spacing="10">
-                        <TextBlock Text="Umbrales y Colores de Alerta"
+                        <TextBlock Text="{Binding [Nav.Thresholds]}"
                                    FontWeight="SemiBold"
                                    FontSize="14" />
 
-                        <TextBlock Text="Personaliza los límites de horas de desfase y sus colores de insignia en la bandeja."
+                        <TextBlock Text="{Binding [Nav.ThresholdsDesc]}"
                                    FontSize="11"
                                    Foreground="{DynamicResource SystemBaseMediumColor}" />
 
                         <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" Margin="0,4,0,0">
                             <!-- Optimal threshold -->
                             <StackPanel Grid.Row="0" Grid.Column="0" Spacing="4" Margin="0,0,8,8">
-                                <TextBlock Text="Margen Óptimo (horas):" FontSize="11" FontWeight="Medium" />
+                                <TextBlock Text="{Binding [Threshold.OptimalMargin]}" FontSize="11" FontWeight="Medium" />
                                 <NumericUpDown Value="{Binding OptimalMarginHours}"
                                                Minimum="0.1"
                                                Maximum="5.0"
@@ -189,7 +208,7 @@
 
                             <!-- Rush threshold -->
                             <StackPanel Grid.Row="0" Grid.Column="1" Spacing="4" Margin="8,0,0,8">
-                                <TextBlock Text="Límite Ritmo Excesivo (horas):" FontSize="11" FontWeight="Medium" />
+                                <TextBlock Text="{Binding [Threshold.HighMargin]}" FontSize="11" FontWeight="Medium" />
                                 <NumericUpDown Value="{Binding HighRateMarginHours}"
                                                Minimum="1.0"
                                                Maximum="20.0"
@@ -197,23 +216,23 @@
                                                FormatString="{}{0:0.0} h" />
                             </StackPanel>
 
-                            <!-- Color hex inputs -->
-                            <Grid Grid.Row="1" Grid.ColumnSpan="2" ColumnDefinitions="*,*,*,*" Margin="0,4,0,0">
-                                <StackPanel Grid.Column="0" Spacing="2" Margin="0,0,4,0">
-                                    <TextBlock Text="Óptimo (Verde)" FontSize="10" />
-                                    <TextBox Text="{Binding ColorOptimalHex}" FontSize="11" />
+                            <!-- Visual Color Pickers -->
+                            <Grid Grid.Row="1" Grid.ColumnSpan="2" ColumnDefinitions="*,*,*,*" Margin="0,8,0,0">
+                                <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,6,0">
+                                    <TextBlock Text="Óptimo" FontSize="11" FontWeight="Medium" />
+                                    <ColorPicker Color="{Binding ColorOptimal, Mode=TwoWay}" HorizontalAlignment="Stretch" />
                                 </StackPanel>
-                                <StackPanel Grid.Column="1" Spacing="2" Margin="2,0,2,0">
-                                    <TextBlock Text="Rápido (Amarillo)" FontSize="10" />
-                                    <TextBox Text="{Binding ColorWarningFastHex}" FontSize="11" />
+                                <StackPanel Grid.Column="1" Spacing="4" Margin="3,0,3,0">
+                                    <TextBlock Text="Acelerado" FontSize="11" FontWeight="Medium" />
+                                    <ColorPicker Color="{Binding ColorWarningFast, Mode=TwoWay}" HorizontalAlignment="Stretch" />
                                 </StackPanel>
-                                <StackPanel Grid.Column="2" Spacing="2" Margin="2,0,2,0">
-                                    <TextBlock Text="Excesivo (Rojo)" FontSize="10" />
-                                    <TextBox Text="{Binding ColorDangerFastHex}" FontSize="11" />
+                                <StackPanel Grid.Column="2" Spacing="4" Margin="3,0,3,0">
+                                    <TextBlock Text="Excesivo" FontSize="11" FontWeight="Medium" />
+                                    <ColorPicker Color="{Binding ColorDangerFast, Mode=TwoWay}" HorizontalAlignment="Stretch" />
                                 </StackPanel>
-                                <StackPanel Grid.Column="3" Spacing="2" Margin="4,0,0,0">
-                                    <TextBlock Text="Lento (Azul)" FontSize="10" />
-                                    <TextBox Text="{Binding ColorSlowHex}" FontSize="11" />
+                                <StackPanel Grid.Column="3" Spacing="4" Margin="6,0,0,0">
+                                    <TextBlock Text="Lento" FontSize="11" FontWeight="Medium" />
+                                    <ColorPicker Color="{Binding ColorSlow, Mode=TwoWay}" HorizontalAlignment="Stretch" />
                                 </StackPanel>
                             </Grid>
                         </Grid>
@@ -226,46 +245,55 @@
                         CornerRadius="8"
                         Padding="16">
                     <StackPanel Spacing="10">
-                        <TextBlock Text="Telemetría y Observabilidad (Grafana / OpenTelemetry)"
+                        <TextBlock Text="{Binding [Nav.Telemetry]}"
                                    FontWeight="SemiBold"
                                    FontSize="14" />
 
-                        <TextBlock Text="Emite métricas, trazas y logs hacia Grafana Cloud o un recolector OTLP seguro con TLS."
+                        <TextBlock Text="{Binding [Nav.TelemetryDesc]}"
                                    FontSize="11"
                                    Foreground="{DynamicResource SystemBaseMediumColor}" />
 
-                        <CheckBox Content="Habilitar emisión de telemetría OpenTelemetry (OTLP)"
+                        <CheckBox Content="{Binding [Telemetry.Enable]}"
                                   IsChecked="{Binding TelemetryEnabled}"
                                   FontWeight="Medium"
                                   Margin="0,2,0,0" />
 
                         <StackPanel Spacing="8" IsEnabled="{Binding TelemetryEnabled}" Margin="0,4,0,0">
+                            <!-- Endpoint -->
                             <StackPanel Spacing="3">
-                                <TextBlock Text="Endpoint OTLP (HTTPS):" FontSize="11" FontWeight="Medium" />
+                                <TextBlock Text="{Binding [Telemetry.Endpoint]}" FontSize="11" FontWeight="Medium" />
                                 <TextBox Text="{Binding TelemetryEndpoint}"
-                                         PlaceholderText="https://otlp-gateway-prod-eu-west-0.grafana.net/otlp" />
+                                         PlaceholderText="http://localhost:4318 o https://otlp-gateway-{region}.grafana.net/otlp" />
+                                <TextBlock Text="ℹ️ Autoalojado (Collector / Alloy): http://localhost:4318 | Grafana Cloud: https://otlp-gateway-{region}.grafana.net/otlp"
+                                           FontSize="10"
+                                           Foreground="{DynamicResource SystemBaseMediumColor}" />
                             </StackPanel>
 
-                            <Grid ColumnDefinitions="*,*">
-                                <StackPanel Grid.Column="0" Spacing="3" Margin="0,0,6,0">
-                                    <TextBlock Text="Protocolo:" FontSize="11" FontWeight="Medium" />
-                                    <TextBox Text="{Binding TelemetryProtocol}"
-                                             PlaceholderText="HttpProtobuf o Grpc" />
-                                </StackPanel>
-
-                                <StackPanel Grid.Column="1" Spacing="3" Margin="6,0,0,0">
-                                    <TextBlock Text="Nombre del Servicio:" FontSize="11" FontWeight="Medium" />
-                                    <TextBox Text="{Binding TelemetryServiceName}"
-                                             PlaceholderText="vsn-ai-rate-tracker" />
-                                </StackPanel>
-                            </Grid>
-
                             <StackPanel Spacing="3">
-                                <TextBlock Text="Cabeceras de Autorización (cifradas en almacén seguro):" FontSize="11" FontWeight="Medium" />
+                                <TextBlock Text="{Binding [Telemetry.ServiceName]}" FontSize="11" FontWeight="Medium" />
+                                <TextBox Text="{Binding TelemetryServiceName}"
+                                         PlaceholderText="vsn-ai-rate-tracker" />
+                            </StackPanel>
+
+                            <!-- Headers -->
+                            <StackPanel Spacing="3">
+                                <TextBlock Text="{Binding [Telemetry.Headers]}" FontSize="11" FontWeight="Medium" />
                                 <TextBox Text="{Binding TelemetryHeaders}"
                                          PasswordChar="*"
-                                         PlaceholderText="Authorization=Basic &lt;base64(instance:token)&gt;" />
+                                         PlaceholderText="Authorization=Basic &lt;base64(usuario:token)&gt;" />
+                                <TextBlock Text="ℹ️ Dejar en blanco si el Collector local no requiere auth. En Grafana Cloud introduce Authorization=Basic &lt;base64&gt;"
+                                           FontSize="10"
+                                           Foreground="{DynamicResource SystemBaseMediumColor}" />
                             </StackPanel>
+
+                            <!-- Machine name badge -->
+                            <Border Background="{DynamicResource SystemBaseLowColor}" CornerRadius="4" Padding="10,6" Margin="0,4,0,0">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <TextBlock Text="🖥️" VerticalAlignment="Center" />
+                                    <TextBlock Text="Nombre del equipo en métricas y trazas:" FontSize="11" Foreground="{DynamicResource SystemBaseMediumColor}" VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding MachineName}" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Border>
                         </StackPanel>
                     </StackPanel>
                 </Border>
@@ -276,7 +304,7 @@
                         CornerRadius="8"
                         Padding="16">
                     <StackPanel Spacing="10">
-                        <TextBlock Text="Sincronización en Segundo Plano"
+                        <TextBlock Text="{Binding [Auth.SyncInterval]}"
                                    FontWeight="SemiBold"
                                    FontSize="14" />
 
@@ -301,14 +329,14 @@
         <!-- Footer Buttons -->
         <Grid Grid.Row="2" ColumnDefinitions="*,Auto,Auto" Margin="0,16,0,0">
             <Button Grid.Column="1"
-                    Content="Cancelar"
+                    Content="{Binding [Common.Cancel]}"
                     Width="100"
                     Margin="0,0,8,0"
                     Click="OnCancelClick" />
             <Button Grid.Column="2"
-                    Content="Guardar"
+                    Content="{Binding [Common.Save]}"
                     Classes="accent"
-                    Width="110"
+                    Width="140"
                     Click="OnSaveClick" />
         </Grid>
     </Grid>

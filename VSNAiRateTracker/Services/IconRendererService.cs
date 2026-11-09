@@ -63,45 +63,39 @@ public class IconRendererService : IIconRendererService
                 color = parsedColor;
             }
 
-            using var circlePaint = new SKPaint
+            // Direct numerical hourly value rendered cleanly in the defined status color (no circular background)
+            float fontScale = text.Length switch
+            {
+                <= 2 => 0.52f,
+                3 => 0.44f,
+                4 => 0.38f,
+                _ => 0.32f
+            };
+
+            using var typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyleWeight.Bold, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright);
+            using var font = new SKFont(typeface, size * fontScale);
+
+            // Subtle dark contrast outline to guarantee sharpness on both light and dark system trays
+            using var outlinePaint = new SKPaint
+            {
+                Color = new SKColor(0, 0, 0, 160),
+                IsAntialias = true,
+                Style = SKPaintStyle.Stroke,
+                StrokeWidth = Math.Max(1.5f, size * 0.035f)
+            };
+
+            using var textPaint = new SKPaint
             {
                 Color = color,
                 IsAntialias = true,
                 Style = SKPaintStyle.Fill
             };
 
-            float radius = (size / 2f) - 1.5f;
-            canvas.DrawCircle(size / 2f, size / 2f, radius, circlePaint);
-
-            // Subtle border highlight
-            using var borderPaint = new SKPaint
-            {
-                Color = new SKColor(255, 255, 255, 70),
-                IsAntialias = true,
-                Style = SKPaintStyle.Stroke,
-                StrokeWidth = 2f
-            };
-            canvas.DrawCircle(size / 2f, size / 2f, radius - 1f, borderPaint);
-
-            // Dynamic font sizing according to text length (+0.2, -0.1, +1.5, etc.)
-            float fontScale = text.Length switch
-            {
-                <= 2 => 0.38f,
-                3 => 0.33f,
-                4 => 0.28f,
-                _ => 0.24f
-            };
-
-            using var font = new SKFont(SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold), size * fontScale);
-            using var textPaint = new SKPaint
-            {
-                Color = SKColors.White,
-                IsAntialias = true
-            };
-
             font.MeasureText(text, out var textBounds, textPaint);
             float x = size / 2f;
             float y = (size / 2f) - textBounds.MidY;
+
+            canvas.DrawText(text, x, y, SKTextAlign.Center, font, outlinePaint);
             canvas.DrawText(text, x, y, SKTextAlign.Center, font, textPaint);
         }
 

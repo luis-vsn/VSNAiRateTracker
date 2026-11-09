@@ -95,9 +95,9 @@ public class SettingsViewModelTests
         _sut.ColorOptimalHex = "#00FF00";
         _sut.TelemetryEnabled = true;
         _sut.TelemetryEndpoint = "https://otlp.grafana.com:4318";
-        _sut.TelemetryProtocol = "HttpProtobuf";
         _sut.TelemetryHeaders = "Authorization=Basic test";
         _sut.TelemetryServiceName = "my-tracker";
+        _sut.SelectedLanguage = "English";
 
         var config = _sut.ToConfig();
 
@@ -109,6 +109,8 @@ public class SettingsViewModelTests
         config.Telemetry.Protocol.Should().Be("HttpProtobuf");
         config.Telemetry.Headers.Should().Be("Authorization=Basic test");
         config.Telemetry.ServiceName.Should().Be("my-tracker");
+        config.Language.Should().Be("en");
+        _sut.MachineName.Should().NotBeNullOrWhiteSpace();
     }
 
     [Fact]
@@ -196,5 +198,25 @@ public class SettingsViewModelTests
         result.Should().BeTrue();
         _sut.IsStatusSuccess.Should().BeTrue();
         _storageMock.Verify(s => s.SaveConfigAsync(It.Is<AppConfig>(c => c.ApiKey == "sk-ant-key"), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public void ColorProperties_SyncCorrectlyWithHexStrings()
+    {
+        _sut.ColorOptimal = Avalonia.Media.Color.Parse("#123456");
+        _sut.ColorOptimalHex.Should().Be("#123456");
+
+        _sut.ColorOptimalHex = "#654321";
+        _sut.ColorOptimal.Should().Be(Avalonia.Media.Color.Parse("#654321"));
+    }
+
+    [Fact]
+    public void LanguageSelection_SwitchesLocalizationAndStrings()
+    {
+        _sut.SelectedLanguage = "English";
+        _sut["App.Title"].Should().Contain("Settings");
+
+        _sut.SelectedLanguage = "Español";
+        _sut["App.Title"].Should().Contain("Configuración");
     }
 }

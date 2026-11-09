@@ -17,10 +17,10 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Setup .NET
-      uses: actions/setup-dotnet@v4
+      uses: actions/setup-dotnet@v5
       with:
         dotnet-version: '10.0.x'
 
@@ -43,24 +43,31 @@ jobs:
       if: matrix.os == 'windows-latest'
       shell: pwsh
       run: |
-        ./packaging/windows/build-installer.ps1
+        ./packaging/windows/build-installer.ps1 -Version 0.0.1
 
-    - name: Upload Windows Artifacts
+    - name: Upload Windows Installer
       if: matrix.os == 'windows-latest'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
-        name: windows-installer-and-portable
-        path: packaging/dist/*
+        name: windows-installer
+        path: packaging/dist/*Setup*.exe
+
+    - name: Upload Windows Portable Package
+      if: matrix.os == 'windows-latest'
+      uses: actions/upload-artifact@v5
+      with:
+        name: windows-portable
+        path: packaging/dist/*portable*.zip
 
     - name: Build macOS DMG (macOS)
       if: matrix.os == 'macos-latest'
       run: |
         chmod +x ./packaging/macos/build-dmg.sh
-        ./packaging/macos/build-dmg.sh Release 1.0.0 osx-arm64
+        ./packaging/macos/build-dmg.sh Release 0.0.1 osx-arm64
 
     - name: Upload macOS Artifacts
       if: matrix.os == 'macos-latest'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: macos-dmg
         path: packaging/dist/*.dmg

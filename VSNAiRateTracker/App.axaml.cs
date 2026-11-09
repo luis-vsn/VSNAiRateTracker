@@ -69,6 +69,15 @@ public partial class App : Application
         if (_storageService == null || _authService == null) return;
 
         var config = await _storageService.LoadConfigAsync();
+
+        // Initialize language: detect system culture if not yet configured
+        if (string.IsNullOrWhiteSpace(config.Language))
+        {
+            config.Language = LocalizationService.DetectSystemLanguage();
+            await _storageService.SaveConfigAsync(config);
+        }
+        LocalizationService.Instance.CurrentLanguage = config.Language;
+
         if (!config.HasCredentials)
         {
             var imported = await _authService.TryImportFromClaudeCliAsync();

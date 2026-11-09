@@ -90,7 +90,40 @@ dotnet run --project VSNAiRateTracker/VSNAiRateTracker.csproj
 
 ---
 
+## Configuración de Telemetría OpenTelemetry (Grafana / Collector)
+
+La aplicación puede emitir trazas, métricas y logs estructurados vía **OTLP HTTP (Protobuf)** para su visualización centralizada en Grafana o cualquier backend compatible con OpenTelemetry.
+
+### 1. ¿Qué poner en el Endpoint?
+
+* **Instancia autoalojada (OpenTelemetry Collector o Grafana Alloy):**
+  - Si tienes un Collector corriendo en tu equipo o en la red local de la empresa:
+    - `http://localhost:4318` o `http://<ip-o-servidor>:4318`
+  - Si tu Collector o Reverse Proxy tiene TLS configurado:
+    - `https://collector.miempresa.com:4318`
+* **Grafana Cloud:**
+  - En la consola de Grafana Cloud, ve a **Connections** > **OpenTelemetry** y copia el *OTLP Endpoint*.
+  - Formato típico: `https://otlp-gateway-<region>.grafana.net/otlp` (por ejemplo `https://otlp-gateway-prod-eu-west-0.grafana.net/otlp`).
+
+### 2. ¿Qué poner en las Cabeceras de Autorización (Authorization Headers)?
+
+* **Instancia autoalojada:**
+  - **Déjalo en blanco** si tu Collector local no requiere autenticación.
+  - Si configuraste autenticación Bearer: `Authorization=Bearer <tu-token>`
+* **Grafana Cloud:**
+  - `Authorization=Basic <token_base64>`
+  - Donde `<token_base64>` es la cadena Base64 generada a partir de `<Instance_ID>:<API_Token>` (Grafana Cloud te proporciona este valor directamente en la pantalla de configuración OTLP).
+
+### 3. Identificación del equipo emisor (`host.name`)
+
+Cada métrica, log y traza enviada por la aplicación incluye de forma automática:
+* `host.name`: Nombre de la máquina donde se ejecuta la aplicación (`Environment.MachineName`), permitiendo filtrar dashboards de Grafana por puesto o usuario.
+* `service.name`: Nombre del servicio configurado (por defecto `vsn-ai-rate-tracker`).
+* `service.version`: Versión de la aplicación (`0.0.1`).
+
+---
+
 ## Estado Multiplataforma
 
 * **Windows:** Completado e implementado al 100% (Issues #1 a #7 cerrados).
-* **macOS:** Documentado en el **[Issue #8](https://github.com/luis-vsn/VSNAiRateTracker/issues/8)** para ser retomado por un compañero con hardware Mac (validación de Menu Bar y assets nativos de macOS).
+* **macOS:** Documentado en el **[Issue #8](https://github.com/luis-vsn/VSNAiRateTracker/issues/8)** para ser retomado por un compañero con hardware Mac (validación de Menu Bar, empaquetado DMG y soporte multilingüe).

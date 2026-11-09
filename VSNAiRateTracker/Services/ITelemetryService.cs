@@ -13,3 +13,4 @@ public interface ITelemetryService : IDisposable
     void LogWarning(string message);
     void LogError(string message, Exception? ex = null);
 }
+

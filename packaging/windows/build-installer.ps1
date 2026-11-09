@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [string]$Configuration = "Release",
-    [string]$Version = "1.0.0",
+    [string]$Version = "0.0.1",
     [switch]$SkipInstaller
 )
 
@@ -109,3 +109,4 @@ if (Test-Path $zipPath) {
     Write-Host "SHA-256:   $zipHash" -ForegroundColor Gray
 }
 Write-Host "====================================================" -ForegroundColor Green
+

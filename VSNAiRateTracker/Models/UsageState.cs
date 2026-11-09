@@ -54,16 +54,29 @@ public class UsageState
         }
     }
 
-    public string StatusDescription => Status switch
+    public string StatusDescription
     {
-        RateStatus.Optimal => "Ritmo óptimo",
-        RateStatus.WarningFast => "Ritmo acelerado",
-        RateStatus.DangerFast => "Ritmo excesivo",
-        RateStatus.Slow => "Ritmo lento",
-        _ => "En margen"
-    };
+        get
+        {
+            var loc = Services.LocalizationService.Instance;
+            return Status switch
+            {
+                RateStatus.Optimal => loc.GetString("RateStatus.Optimal"),
+                RateStatus.WarningFast => loc.GetString("RateStatus.WarningFast"),
+                RateStatus.DangerFast => loc.GetString("RateStatus.DangerFast"),
+                RateStatus.Slow => loc.GetString("RateStatus.Slow"),
+                _ => loc.GetString("RateStatus.Optimal")
+            };
+        }
+    }
 
-    public string TooltipText =>
-        $"Anthropic: {PercentConsumed:F0}% gastado | Desfase: {FormattedDelta} ({StatusDescription})";
+    public string TooltipText
+    {
+        get
+        {
+            var loc = Services.LocalizationService.Instance;
+            return loc.GetString("Tooltip.Format", PercentConsumed, FormattedDelta, StatusDescription);
+        }
+    }
 }
 

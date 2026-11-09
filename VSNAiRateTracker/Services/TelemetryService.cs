@@ -70,15 +70,20 @@ public class TelemetryService : ITelemetryService
             {
                 var endpointUri = new Uri(config.Endpoint);
                 var serviceName = string.IsNullOrWhiteSpace(config.ServiceName) ? "vsn-ai-rate-tracker" : config.ServiceName;
+                var machineName = Environment.MachineName;
+
                 var resourceBuilder = ResourceBuilder.CreateDefault()
-                    .AddService(serviceName, serviceVersion: "2.0.0")
+                    .AddService(serviceName, serviceVersion: "0.0.1")
+                    .AddAttributes(new[]
+                    {
+                        new KeyValuePair<string, object>("host.name", machineName),
+                        new KeyValuePair<string, object>("service.name", serviceName),
+                        new KeyValuePair<string, object>("service.version", "0.0.1")
+                    })
                     .AddTelemetrySdk();
 
-                var protocol = OtlpExportProtocol.HttpProtobuf;
-                if (string.Equals(config.Protocol, "Grpc", StringComparison.OrdinalIgnoreCase))
-                {
-                    protocol = OtlpExportProtocol.Grpc;
-                }
+                // Standardized on OTLP HTTP Protobuf (port 4318 / 443 HTTPS)
+                const OtlpExportProtocol protocol = OtlpExportProtocol.HttpProtobuf;
 
                 // 1. Meter Provider
                 _meterProvider = Sdk.CreateMeterProviderBuilder()

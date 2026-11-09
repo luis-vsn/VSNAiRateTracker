@@ -103,6 +103,7 @@ public class AppConfig
     public string ApiKey { get; set; } = string.Empty;
     public OAuthTokens? AuthTokens { get; set; }
     public int SyncIntervalMinutes { get; set; } = 5;
+    public string Language { get; set; } = string.Empty;
     public WorkSchedule Schedule { get; set; } = WorkSchedule.CreateDefault();
     public RateThresholdConfig Thresholds { get; set; } = new();
     public TelemetryConfig Telemetry { get; set; } = new();

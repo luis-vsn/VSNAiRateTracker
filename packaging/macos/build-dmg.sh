@@ -3,7 +3,7 @@
 set -euo pipefail
 
 CONFIGURATION="${1:-Release}"
-VERSION="${2:-1.0.0}"
+VERSION="${2:-0.0.1}"
 RUNTIME="${3:-osx-arm64}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -62,3 +62,4 @@ echo "macOS build completed successfully!"
 echo "App Bundle: ${APP_BUNDLE}"
 echo "DMG Image:  ${DMG_PATH}"
 echo "===================================================="
+

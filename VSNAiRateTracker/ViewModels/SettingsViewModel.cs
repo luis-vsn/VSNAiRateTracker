@@ -5,6 +5,7 @@ using System.ComponentModel;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
+using Avalonia.Media;
 using VSNAiRateTracker.Models;
 using VSNAiRateTracker.Services;
 
@@ -32,13 +33,25 @@ public class DayScheduleItemViewModel : INotifyPropertyChanged
     public DayOfWeek Day
     {
         get => _day;
-        set => SetField(ref _day, value);
+        set
+        {
+            if (SetField(ref _day, value))
+            {
+                OnPropertyChanged(nameof(DayName));
+            }
+        }
     }
 
     public string DayName
     {
-        get => _dayName;
+        get => string.IsNullOrEmpty(_dayName) ? LocalizationService.Instance.GetString($"Day.{_day}") : _dayName;
         set => SetField(ref _dayName, value);
+    }
+
+    public void RefreshDayName()
+    {
+        _dayName = LocalizationService.Instance.GetString($"Day.{_day}");
+        OnPropertyChanged(nameof(DayName));
     }
 
     public bool IsEnabled
@@ -66,6 +79,11 @@ public class DayScheduleItemViewModel : INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         return true;
     }
+
+    protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
 }
 
 public class SettingsViewModel : INotifyPropertyChanged
@@ -86,9 +104,13 @@ public class SettingsViewModel : INotifyPropertyChanged
     private string _colorDangerFastHex = "#E74C3C";
     private string _colorSlowHex = "#3498DB";
 
+    private Color _colorOptimal = Color.Parse("#2ECC71");
+    private Color _colorWarningFast = Color.Parse("#F39C12");
+    private Color _colorDangerFast = Color.Parse("#E74C3C");
+    private Color _colorSlow = Color.Parse("#3498DB");
+
     private bool _telemetryEnabled;
     private string _telemetryEndpoint = string.Empty;
-    private string _telemetryProtocol = "HttpProtobuf";
     private string _telemetryHeaders = string.Empty;
     private string _telemetryServiceName = "vsn-ai-rate-tracker";
 
@@ -99,9 +121,15 @@ public class SettingsViewModel : INotifyPropertyChanged
     private string _sessionStatusText = "Sesión no iniciada.";
     private bool _isLoggedInWithWeb;
 
+    private string _selectedLanguage = "Español";
+    public ObservableCollection<string> AvailableLanguages { get; } = new() { "Español", "English" };
+
     public ObservableCollection<DayScheduleItemViewModel> DaySchedules { get; } = new();
 
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    public string this[string key] => LocalizationService.Instance.GetString(key);
+    public string MachineName => Environment.MachineName;
 
     public SettingsViewModel(
         ISecureStorageService storageService,
@@ -112,19 +140,50 @@ public class SettingsViewModel : INotifyPropertyChanged
         _apiService = apiService ?? throw new ArgumentNullException(nameof(apiService));
         _authService = authService ?? throw new ArgumentNullException(nameof(authService));
 
+        LocalizationService.Instance.LanguageChanged += (_, _) =>
+        {
+            RefreshDayNames();
+            UpdateSessionStatus();
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(null));
+        };
+
         InitializeDefaultDays();
+    }
+
+    public string SelectedLanguage
+    {
+        get => _selectedLanguage;
+        set
+        {
+            if (SetField(ref _selectedLanguage, value))
+            {
+                var code = value == "English" ? "en" : "es";
+                LocalizationService.Instance.CurrentLanguage = code;
+                RefreshDayNames();
+                UpdateSessionStatus();
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(null));
+            }
+        }
+    }
+
+    public void RefreshDayNames()
+    {
+        foreach (var item in DaySchedules)
+        {
+            item.RefreshDayName();
+        }
     }
 
     private void InitializeDefaultDays()
     {
         DaySchedules.Clear();
-        DaySchedules.Add(new DayScheduleItemViewModel(DayOfWeek.Monday, "Lunes", true, new TimeSpan(9, 0, 0), new TimeSpan(18, 30, 0)));
-        DaySchedules.Add(new DayScheduleItemViewModel(DayOfWeek.Tuesday, "Martes", true, new TimeSpan(9, 0, 0), new TimeSpan(18, 30, 0)));
-        DaySchedules.Add(new DayScheduleItemViewModel(DayOfWeek.Wednesday, "Miércoles", true, new TimeSpan(9, 0, 0), new TimeSpan(18, 30, 0)));
-        DaySchedules.Add(new DayScheduleItemViewModel(DayOfWeek.Thursday, "Jueves", true, new TimeSpan(9, 0, 0), new TimeSpan(18, 30, 0)));
-        DaySchedules.Add(new DayScheduleItemViewModel(DayOfWeek.Friday, "Viernes", true, new TimeSpan(9, 0, 0), new TimeSpan(18, 30, 0)));
-        DaySchedules.Add(new DayScheduleItemViewModel(DayOfWeek.Saturday, "Sábado", false, new TimeSpan(9, 0, 0), new TimeSpan(14, 0, 0)));
-        DaySchedules.Add(new DayScheduleItemViewModel(DayOfWeek.Sunday, "Domingo", false, new TimeSpan(9, 0, 0), new TimeSpan(14, 0, 0)));
+        DaySchedules.Add(new DayScheduleItemViewModel(DayOfWeek.Monday, LocalizationService.Instance.GetString("Day.Monday"), true, new TimeSpan(9, 0, 0), new TimeSpan(18, 30, 0)));
+        DaySchedules.Add(new DayScheduleItemViewModel(DayOfWeek.Tuesday, LocalizationService.Instance.GetString("Day.Tuesday"), true, new TimeSpan(9, 0, 0), new TimeSpan(18, 30, 0)));
+        DaySchedules.Add(new DayScheduleItemViewModel(DayOfWeek.Wednesday, LocalizationService.Instance.GetString("Day.Wednesday"), true, new TimeSpan(9, 0, 0), new TimeSpan(18, 30, 0)));
+        DaySchedules.Add(new DayScheduleItemViewModel(DayOfWeek.Thursday, LocalizationService.Instance.GetString("Day.Thursday"), true, new TimeSpan(9, 0, 0), new TimeSpan(18, 30, 0)));
+        DaySchedules.Add(new DayScheduleItemViewModel(DayOfWeek.Friday, LocalizationService.Instance.GetString("Day.Friday"), true, new TimeSpan(9, 0, 0), new TimeSpan(18, 30, 0)));
+        DaySchedules.Add(new DayScheduleItemViewModel(DayOfWeek.Saturday, LocalizationService.Instance.GetString("Day.Saturday"), false, new TimeSpan(9, 0, 0), new TimeSpan(14, 0, 0)));
+        DaySchedules.Add(new DayScheduleItemViewModel(DayOfWeek.Sunday, LocalizationService.Instance.GetString("Day.Sunday"), false, new TimeSpan(9, 0, 0), new TimeSpan(14, 0, 0)));
     }
 
     public string ApiKey
@@ -181,28 +240,120 @@ public class SettingsViewModel : INotifyPropertyChanged
         set => SetField(ref _highRateMarginHours, value);
     }
 
+    public Color ColorOptimal
+    {
+        get => _colorOptimal;
+        set
+        {
+            if (SetField(ref _colorOptimal, value))
+            {
+                _colorOptimalHex = $"#{value.R:X2}{value.G:X2}{value.B:X2}";
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ColorOptimalHex)));
+            }
+        }
+    }
+
+    public Color ColorWarningFast
+    {
+        get => _colorWarningFast;
+        set
+        {
+            if (SetField(ref _colorWarningFast, value))
+            {
+                _colorWarningFastHex = $"#{value.R:X2}{value.G:X2}{value.B:X2}";
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ColorWarningFastHex)));
+            }
+        }
+    }
+
+    public Color ColorDangerFast
+    {
+        get => _colorDangerFast;
+        set
+        {
+            if (SetField(ref _colorDangerFast, value))
+            {
+                _colorDangerFastHex = $"#{value.R:X2}{value.G:X2}{value.B:X2}";
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ColorDangerFastHex)));
+            }
+        }
+    }
+
+    public Color ColorSlow
+    {
+        get => _colorSlow;
+        set
+        {
+            if (SetField(ref _colorSlow, value))
+            {
+                _colorSlowHex = $"#{value.R:X2}{value.G:X2}{value.B:X2}";
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ColorSlowHex)));
+            }
+        }
+    }
+
     public string ColorOptimalHex
     {
         get => _colorOptimalHex;
-        set => SetField(ref _colorOptimalHex, value);
+        set
+        {
+            if (SetField(ref _colorOptimalHex, value))
+            {
+                if (Color.TryParse(value, out var c))
+                {
+                    _colorOptimal = c;
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ColorOptimal)));
+                }
+            }
+        }
     }
 
     public string ColorWarningFastHex
     {
         get => _colorWarningFastHex;
-        set => SetField(ref _colorWarningFastHex, value);
+        set
+        {
+            if (SetField(ref _colorWarningFastHex, value))
+            {
+                if (Color.TryParse(value, out var c))
+                {
+                    _colorWarningFast = c;
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ColorWarningFast)));
+                }
+            }
+        }
     }
 
     public string ColorDangerFastHex
     {
         get => _colorDangerFastHex;
-        set => SetField(ref _colorDangerFastHex, value);
+        set
+        {
+            if (SetField(ref _colorDangerFastHex, value))
+            {
+                if (Color.TryParse(value, out var c))
+                {
+                    _colorDangerFast = c;
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ColorDangerFast)));
+                }
+            }
+        }
     }
 
     public string ColorSlowHex
     {
         get => _colorSlowHex;
-        set => SetField(ref _colorSlowHex, value);
+        set
+        {
+            if (SetField(ref _colorSlowHex, value))
+            {
+                if (Color.TryParse(value, out var c))
+                {
+                    _colorSlow = c;
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ColorSlow)));
+                }
+            }
+        }
     }
 
     public bool TelemetryEnabled
@@ -215,12 +366,6 @@ public class SettingsViewModel : INotifyPropertyChanged
     {
         get => _telemetryEndpoint;
         set => SetField(ref _telemetryEndpoint, value);
-    }
-
-    public string TelemetryProtocol
-    {
-        get => _telemetryProtocol;
-        set => SetField(ref _telemetryProtocol, value);
     }
 
     public string TelemetryHeaders
@@ -334,6 +479,17 @@ public class SettingsViewModel : INotifyPropertyChanged
         SyncIntervalMinutes = config.SyncIntervalMinutes > 0 ? config.SyncIntervalMinutes : 5;
         TimeZoneId = config.Schedule?.TimeZoneId ?? "Local";
 
+        if (!string.IsNullOrWhiteSpace(config.Language))
+        {
+            var isEn = config.Language.StartsWith("en", StringComparison.OrdinalIgnoreCase);
+            SelectedLanguage = isEn ? "English" : "Español";
+        }
+        else
+        {
+            var detected = LocalizationService.DetectSystemLanguage();
+            SelectedLanguage = detected == "en" ? "English" : "Español";
+        }
+
         if (config.Schedule?.Slots != null && config.Schedule.Slots.Count > 0)
         {
             foreach (var item in DaySchedules)
@@ -366,7 +522,6 @@ public class SettingsViewModel : INotifyPropertyChanged
         {
             TelemetryEnabled = config.Telemetry.Enabled;
             TelemetryEndpoint = config.Telemetry.Endpoint ?? string.Empty;
-            TelemetryProtocol = config.Telemetry.Protocol ?? "HttpProtobuf";
             TelemetryHeaders = config.Telemetry.Headers ?? string.Empty;
             TelemetryServiceName = config.Telemetry.ServiceName ?? "vsn-ai-rate-tracker";
         }
@@ -381,6 +536,7 @@ public class SettingsViewModel : INotifyPropertyChanged
             ApiKey = ApiKey.Trim(),
             AuthTokens = AuthTokens,
             SyncIntervalMinutes = SyncIntervalMinutes,
+            Language = SelectedLanguage == "English" ? "en" : "es",
             Schedule = new WorkSchedule
             {
                 TimeZoneId = TimeZoneId
@@ -398,7 +554,7 @@ public class SettingsViewModel : INotifyPropertyChanged
             {
                 Enabled = TelemetryEnabled,
                 Endpoint = TelemetryEndpoint.Trim(),
-                Protocol = TelemetryProtocol,
+                Protocol = "HttpProtobuf",
                 Headers = TelemetryHeaders.Trim(),
                 ServiceName = TelemetryServiceName.Trim()
             }
@@ -545,13 +701,13 @@ public class SettingsViewModel : INotifyPropertyChanged
         {
             var config = ToConfig();
             await _storageService.SaveConfigAsync(config);
-            StatusMessage = "✓ Configuración guardada correctamente.";
+            StatusMessage = LocalizationService.Instance.GetString("Common.SuccessSave");
             IsStatusSuccess = true;
             return true;
         }
         catch (Exception ex)
         {
-            StatusMessage = $"✗ Error al guardar configuración: {ex.Message}";
+            StatusMessage = LocalizationService.Instance.GetString("Common.ErrorSave", ex.Message);
             IsStatusSuccess = false;
             return false;
         }
@@ -559,23 +715,24 @@ public class SettingsViewModel : INotifyPropertyChanged
 
     private void UpdateSessionStatus()
     {
+        var loc = LocalizationService.Instance;
         if (_authTokens != null && !string.IsNullOrWhiteSpace(_authTokens.AccessToken))
         {
             if (_authTokens.IsExpired())
             {
                 IsLoggedInWithWeb = false;
-                SessionStatusText = "⚠️ Sesión expirada. Vuelve a iniciar sesión.";
+                SessionStatusText = loc.GetString("Auth.SessionExpired");
             }
             else
             {
                 IsLoggedInWithWeb = true;
-                SessionStatusText = $"✓ Conectado mediante Web Signing (Válido hasta {_authTokens.ExpiresAt.ToLocalTime():g})";
+                SessionStatusText = loc.GetString("Auth.SessionActive", _authTokens.ExpiresAt.ToLocalTime());
             }
         }
         else
         {
             IsLoggedInWithWeb = false;
-            SessionStatusText = "Sesión no iniciada.";
+            SessionStatusText = loc.GetString("Auth.SessionNotStarted");
         }
     }
 

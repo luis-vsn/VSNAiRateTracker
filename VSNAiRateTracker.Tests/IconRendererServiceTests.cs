@@ -43,8 +43,19 @@ public class IconRendererServiceTests
         bitmap.Width.Should().Be(64);
         bitmap.Height.Should().Be(64);
 
-        var centerPixel = bitmap.GetPixel(32, 32);
-        centerPixel.Alpha.Should().BeGreaterThan(0);
+        bool hasContent = false;
+        for (int y = 0; y < 64 && !hasContent; y++)
+        {
+            for (int x = 0; x < 64; x++)
+            {
+                if (bitmap.GetPixel(x, y).Alpha > 0)
+                {
+                    hasContent = true;
+                    break;
+                }
+            }
+        }
+        hasContent.Should().BeTrue();
     }
 
     [Fact]
