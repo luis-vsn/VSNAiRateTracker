@@ -214,5 +214,222 @@ public class AnthropicApiServiceTests
         // Assert
         isValid.Should().BeFalse();
     }
+
+    [Fact]
+    public async Task GetUsageAsync_WhenOAuthTokensProvided_SendsGetToOAuthUsageEndpointWithHeaders()
+    {
+        // Arrange
+        var tokens = new VSNAiRateTracker.Models.OAuthTokens
+        {
+            AccessToken = "sk-ant-oat-test-token-12345",
+            ExpiresAt = DateTimeOffset.UtcNow.AddHours(2)
+        };
+
+        var handler = new TestHttpMessageHandler((req, _) =>
+        {
+            req.Method.Should().Be(HttpMethod.Get);
+            req.RequestUri!.ToString().Should().Be("https://api.anthropic.com/api/oauth/usage");
+            req.Headers.Authorization!.Scheme.Should().Be("Bearer");
+            req.Headers.Authorization.Parameter.Should().Be("sk-ant-oat-test-token-12345");
+            req.Headers.Contains("anthropic-version").Should().BeTrue();
+            req.Headers.Contains("anthropic-beta").Should().BeTrue();
+            req.Headers.GetValues("anthropic-beta").Should().Contain("oauth-2025-04-20");
+
+            var json = """
+            {
+                "five_hour": {
+                    "utilization": 34.0,
+                    "resets_at": "2026-11-09T14:00:00.000Z"
+                },
+                "seven_day": {
+                    "utilization": 25.0,
+                    "resets_at": "2026-11-12T16:00:00.000Z"
+                }
+            }
+            """;
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json")
+            });
+        });
+
+        var client = new HttpClient(handler);
+        var sut = new AnthropicApiService(client);
+
+        // Act
+        var result = await sut.GetUsageAsync(apiKey: null, tokens: tokens);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.PercentConsumed.Should().BeApproximately(34.0, 0.01);
+        result.CycleEnd.Should().Be(DateTimeOffset.Parse("2026-11-09T14:00:00.000Z"));
+        result.CycleStart.Should().Be(DateTimeOffset.Parse("2026-11-09T09:00:00.000Z"));
+        handler.CallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task GetUsageAsync_WhenOAuthUsageReturnsSevenDayFallback_ParsesCorrectly()
+    {
+        // Arrange
+        var tokens = new VSNAiRateTracker.Models.OAuthTokens
+        {
+            AccessToken = "sk-ant-oat-test-token"
+        };
+
+        var handler = new TestHttpMessageHandler((_, _) =>
+        {
+            var json = """
+            {
+                "five_hour": null,
+                "seven_day": {
+                    "utilization": 42.5,
+                    "resets_at": "2026-11-12T16:00:00.000Z"
+                }
+            }
+            """;
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json")
+            });
+        });
+
+        var client = new HttpClient(handler);
+        var sut = new AnthropicApiService(client);
+
+        // Act
+        var result = await sut.GetUsageAsync(apiKey: null, tokens: tokens);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.PercentConsumed.Should().BeApproximately(42.5, 0.01);
+        result.CycleEnd.Should().Be(DateTimeOffset.Parse("2026-11-12T16:00:00.000Z"));
+        result.CycleStart.Should().Be(DateTimeOffset.Parse("2026-11-05T16:00:00.000Z"));
+    }
+
+    [Fact]
+    public async Task GetUsageAsync_WhenOAuthUsageReturnsLimitsArray_ParsesCorrectly()
+    {
+        // Arrange
+        var tokens = new VSNAiRateTracker.Models.OAuthTokens
+        {
+            AccessToken = "sk-ant-oat-test-token"
+        };
+
+        var handler = new TestHttpMessageHandler((_, _) =>
+        {
+            var json = """
+            {
+                "five_hour": null,
+                "seven_day": null,
+                "limits": [
+                    {
+                        "kind": "session",
+                        "percent": 68.0,
+                        "resets_at": "2026-11-09T18:00:00.000Z"
+                    }
+                ]
+            }
+            """;
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json")
+            });
+        });
+
+        var client = new HttpClient(handler);
+        var sut = new AnthropicApiService(client);
+
+        // Act
+        var result = await sut.GetUsageAsync(apiKey: null, tokens: tokens);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.PercentConsumed.Should().BeApproximately(68.0, 0.01);
+        result.CycleEnd.Should().Be(DateTimeOffset.Parse("2026-11-09T18:00:00.000Z"));
+        result.CycleStart.Should().Be(DateTimeOffset.Parse("2026-11-09T13:00:00.000Z"));
+    }
+
+    [Fact]
+    public async Task GetUsageAsync_WhenOAuthUsageReturns401_MarksSessionExpired()
+    {
+        // Arrange
+        var tokens = new VSNAiRateTracker.Models.OAuthTokens
+        {
+            AccessToken = "sk-ant-oat-revoked-token"
+        };
+
+        var handler = new TestHttpMessageHandler((_, _) =>
+        {
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized)
+            {
+                Content = new StringContent("{\"error\": {\"message\": \"OAuth access token has been revoked.\"}}")
+            });
+        });
+
+        var client = new HttpClient(handler);
+        var sut = new AnthropicApiService(client);
+
+        // Act
+        var result = await sut.GetUsageAsync(apiKey: null, tokens: tokens);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.IsSessionExpired.Should().BeTrue();
+        result.StatusCode.Should().Be(401);
+    }
+
+    [Fact]
+    public async Task ValidateCredentialsAsync_WhenOAuthTokensValid_ReturnsTrue()
+    {
+        // Arrange
+        var tokens = new VSNAiRateTracker.Models.OAuthTokens
+        {
+            AccessToken = "sk-ant-oat-valid-token"
+        };
+
+        var handler = new TestHttpMessageHandler((_, _) =>
+        {
+            var json = "{\"five_hour\": {\"utilization\": 10.0, \"resets_at\": \"2026-11-09T14:00:00.000Z\"}}";
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json")
+            });
+        });
+
+        var client = new HttpClient(handler);
+        var sut = new AnthropicApiService(client);
+
+        // Act
+        var isValid = await sut.ValidateCredentialsAsync(null, tokens);
+
+        // Assert
+        isValid.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task LiveIntegration_WithStoredAppCredentials_RetrievesRealConsumptionSuccessfully()
+    {
+        // Arrange
+        var storage = new SecureStorageService();
+        var config = await storage.LoadConfigAsync();
+        if (config.AuthTokens == null || string.IsNullOrWhiteSpace(config.AuthTokens.AccessToken))
+        {
+            return; // Skip if no local credentials on test runner
+        }
+
+        using var client = new HttpClient();
+        var sut = new AnthropicApiService(client);
+
+        // Act
+        var result = await sut.GetUsageAsync(config.ApiKey, config.AuthTokens);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.PercentConsumed.Should().BeInRange(0.0, 100.0);
+        result.CycleEnd.Should().BeAfter(result.CycleStart);
+    }
 }
 

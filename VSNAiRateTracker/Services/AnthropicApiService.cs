@@ -15,10 +15,13 @@ namespace VSNAiRateTracker.Services;
 public class AnthropicApiService : IAnthropicApiService
 {
     private const string DefaultEndpoint = "https://api.anthropic.com/v1/messages";
+    private const string DefaultOAuthUsageEndpoint = "https://api.anthropic.com/api/oauth/usage";
     private const string AnthropicVersion = "2023-06-01";
+    private const string AnthropicBetaOAuth = "oauth-2025-04-20";
 
     private readonly HttpClient _httpClient;
     private readonly string _endpoint;
+    private readonly string _oauthUsageEndpoint;
     private readonly int _maxRetries;
     private readonly TimeSpan _initialBackoff;
 
@@ -26,10 +29,12 @@ public class AnthropicApiService : IAnthropicApiService
         HttpClient httpClient,
         string? endpoint = null,
         int maxRetries = 3,
-        TimeSpan? initialBackoff = null)
+        TimeSpan? initialBackoff = null,
+        string? oauthUsageEndpoint = null)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _endpoint = endpoint ?? DefaultEndpoint;
+        _oauthUsageEndpoint = oauthUsageEndpoint ?? DefaultOAuthUsageEndpoint;
         _maxRetries = maxRetries;
         _initialBackoff = initialBackoff ?? TimeSpan.FromMilliseconds(200);
     }
@@ -56,6 +61,10 @@ public class AnthropicApiService : IAnthropicApiService
 
                 if (response.IsSuccessStatusCode)
                 {
+                    if (hasToken)
+                    {
+                        return await ParseOAuthUsageResponseAsync(response, cancellationToken);
+                    }
                     return ParseSuccessfulResponse(response);
                 }
 
@@ -76,7 +85,9 @@ public class AnthropicApiService : IAnthropicApiService
                     continue;
                 }
 
-                return AnthropicUsageResult.Failure($"API request failed with HTTP {statusCode}: {response.ReasonPhrase}", statusCode);
+                var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+                var errorSuffix = string.IsNullOrWhiteSpace(errorBody) ? string.Empty : $" ({errorBody})";
+                return AnthropicUsageResult.Failure($"API request failed with HTTP {statusCode}: {response.ReasonPhrase}{errorSuffix}", statusCode);
             }
             catch (HttpRequestException ex)
             {
@@ -119,13 +130,19 @@ public class AnthropicApiService : IAnthropicApiService
 
     private HttpRequestMessage CreateRequest(string? apiKey, OAuthTokens? tokens)
     {
-        var request = new HttpRequestMessage(HttpMethod.Post, _endpoint);
-
         if (tokens != null && !string.IsNullOrWhiteSpace(tokens.AccessToken))
         {
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
+            var oauthRequest = new HttpRequestMessage(HttpMethod.Get, _oauthUsageEndpoint);
+            oauthRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
+            oauthRequest.Headers.Add("anthropic-version", AnthropicVersion);
+            oauthRequest.Headers.Add("anthropic-beta", AnthropicBetaOAuth);
+            oauthRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            return oauthRequest;
         }
-        else if (!string.IsNullOrWhiteSpace(apiKey))
+
+        var request = new HttpRequestMessage(HttpMethod.Post, _endpoint);
+
+        if (!string.IsNullOrWhiteSpace(apiKey))
         {
             request.Headers.Add("x-api-key", apiKey);
         }
@@ -135,7 +152,7 @@ public class AnthropicApiService : IAnthropicApiService
         // Minimal lightweight ping payload for token headers
         var payload = new
         {
-            model = "claude-3-haiku-20240307",
+            model = "claude-3-5-haiku-20241022",
             max_tokens = 1,
             messages = new[]
             {
@@ -145,6 +162,67 @@ public class AnthropicApiService : IAnthropicApiService
 
         request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
         return request;
+    }
+
+    private static async Task<AnthropicUsageResult> ParseOAuthUsageResponseAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        var json = await response.Content.ReadAsStringAsync(cancellationToken);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        double percentConsumed = 0.0;
+        DateTimeOffset cycleEnd = DateTimeOffset.UtcNow.AddHours(5);
+        DateTimeOffset cycleStart = DateTimeOffset.UtcNow;
+
+        if (root.TryGetProperty("five_hour", out var fiveHour) &&
+            fiveHour.ValueKind == JsonValueKind.Object &&
+            fiveHour.TryGetProperty("utilization", out var utilProp) &&
+            utilProp.ValueKind == JsonValueKind.Number)
+        {
+            percentConsumed = utilProp.GetDouble();
+            if (fiveHour.TryGetProperty("resets_at", out var resetsAtProp) &&
+                resetsAtProp.ValueKind == JsonValueKind.String &&
+                DateTimeOffset.TryParse(resetsAtProp.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsedEnd))
+            {
+                cycleEnd = parsedEnd;
+                cycleStart = cycleEnd.AddHours(-5);
+            }
+        }
+        else if (root.TryGetProperty("seven_day", out var sevenDay) &&
+                 sevenDay.ValueKind == JsonValueKind.Object &&
+                 sevenDay.TryGetProperty("utilization", out var sevenUtilProp) &&
+                 sevenUtilProp.ValueKind == JsonValueKind.Number)
+        {
+            percentConsumed = sevenUtilProp.GetDouble();
+            if (sevenDay.TryGetProperty("resets_at", out var resetsAtProp) &&
+                resetsAtProp.ValueKind == JsonValueKind.String &&
+                DateTimeOffset.TryParse(resetsAtProp.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsedEnd))
+            {
+                cycleEnd = parsedEnd;
+                cycleStart = cycleEnd.AddDays(-7);
+            }
+        }
+        else if (root.TryGetProperty("limits", out var limits) && limits.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var limit in limits.EnumerateArray())
+            {
+                if (limit.TryGetProperty("percent", out var pctProp) && pctProp.ValueKind == JsonValueKind.Number)
+                {
+                    percentConsumed = pctProp.GetDouble();
+                    if (limit.TryGetProperty("resets_at", out var resetsAtProp) &&
+                        resetsAtProp.ValueKind == JsonValueKind.String &&
+                        DateTimeOffset.TryParse(resetsAtProp.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsedEnd))
+                    {
+                        cycleEnd = parsedEnd;
+                        cycleStart = cycleEnd.AddHours(-5);
+                    }
+                    break;
+                }
+            }
+        }
+
+        percentConsumed = Math.Clamp(percentConsumed, 0.0, 100.0);
+        return AnthropicUsageResult.Success(percentConsumed, cycleStart, cycleEnd);
     }
 
     private static AnthropicUsageResult ParseSuccessfulResponse(HttpResponseMessage response)
