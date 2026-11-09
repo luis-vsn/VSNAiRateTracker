@@ -86,11 +86,17 @@ public class LocalizationService : ILocalizationService
             ["RateStatus.DangerFast"] = "Ritmo excesivo",
             ["RateStatus.Slow"] = "Ritmo lento",
 
+            ["Threshold.ColorOptimal"] = "Óptimo",
+            ["Threshold.ColorWarningFast"] = "Acelerado",
+            ["Threshold.ColorDangerFast"] = "Excesivo",
+            ["Threshold.ColorSlow"] = "Lento",
+
             ["Telemetry.Enable"] = "Habilitar exportación de telemetría OpenTelemetry (OTLP HTTP)",
             ["Telemetry.Endpoint"] = "Endpoint OTLP (ej. http://localhost:4318 o https://otlp-gateway-<region>.grafana.net/otlp):",
             ["Telemetry.Headers"] = "Cabecera de Autorización (opcional para autoalojado, o Authorization=Basic <token>):",
             ["Telemetry.ServiceName"] = "Nombre del servicio (service.name):",
             ["Telemetry.MachineInfo"] = "ℹ️ Se incluirá automáticamente en todas las métricas, trazas y logs el nombre de la máquina ({0}).",
+            ["Telemetry.MachineNameLabel"] = "Nombre del equipo en métricas y trazas:",
 
             ["Common.Save"] = "Guardar configuración",
             ["Common.Cancel"] = "Cerrar",
@@ -156,11 +162,17 @@ public class LocalizationService : ILocalizationService
             ["RateStatus.DangerFast"] = "Excessive consumption",
             ["RateStatus.Slow"] = "Slow pace",
 
+            ["Threshold.ColorOptimal"] = "Optimal",
+            ["Threshold.ColorWarningFast"] = "Fast",
+            ["Threshold.ColorDangerFast"] = "Excessive",
+            ["Threshold.ColorSlow"] = "Slow",
+
             ["Telemetry.Enable"] = "Enable OpenTelemetry export (OTLP HTTP)",
             ["Telemetry.Endpoint"] = "OTLP Endpoint (e.g. http://localhost:4318 or https://otlp-gateway-<region>.grafana.net/otlp):",
             ["Telemetry.Headers"] = "Authorization Header (optional for self-hosted, or Authorization=Basic <token>):",
             ["Telemetry.ServiceName"] = "Service name (service.name):",
             ["Telemetry.MachineInfo"] = "ℹ️ Machine name ({0}) will be automatically attached to all metrics, traces, and logs.",
+            ["Telemetry.MachineNameLabel"] = "Machine name in metrics and traces:",
 
             ["Common.Save"] = "Save settings",
             ["Common.Cancel"] = "Close",

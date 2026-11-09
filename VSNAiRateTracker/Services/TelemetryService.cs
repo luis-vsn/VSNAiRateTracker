@@ -50,6 +50,11 @@ public class TelemetryService : ITelemetryService
     private double _lastSpendUsedAmount;
     private double _lastSpendPercent;
 
+    private static readonly KeyValuePair<string, object?>[] HostTags = new[]
+    {
+        new KeyValuePair<string, object?>("host_name", Environment.MachineName)
+    };
+
     private bool _isEnabled;
     private bool _isDisposed;
 
@@ -65,27 +70,27 @@ public class TelemetryService : ITelemetryService
         _apiDuration = _meter.CreateHistogram<long>("vsn.rate_tracker.api.duration_ms", "ms", "Duration of Anthropic API call");
 
         // Primary Rate Tracker burndown gauges
-        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.utilization_percent", () => _lastPercentConsumed, "%", "Current primary rate tracker quota utilization percent");
-        _meter.CreateObservableGauge("vsn.rate_tracker.delta_hours", () => _lastDeltaHours, "hours", "Difference between quota spent and working hours elapsed");
-        _meter.CreateObservableGauge("vsn.rate_tracker.status_code", () => _lastStatusValue, description: "Current rate status: 0=Optimal, 1=WarningFast, 2=DangerFast, 3=Slow");
-        _meter.CreateObservableGauge("vsn.rate_tracker.total_work_hours", () => _lastTotalWorkHours, "hours", "Total working hours scheduled in the cycle");
-        _meter.CreateObservableGauge("vsn.rate_tracker.elapsed_work_hours", () => _lastElapsedWorkHours, "hours", "Elapsed working hours in the cycle");
-        _meter.CreateObservableGauge("vsn.rate_tracker.expected_ratio_percent", () => _lastExpectedRatioPercent, "%", "Expected quota consumption percentage based on elapsed working hours");
+        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.utilization_percent", () => new Measurement<double>(_lastPercentConsumed, HostTags), "%", "Current primary rate tracker quota utilization percent");
+        _meter.CreateObservableGauge("vsn.rate_tracker.delta_hours", () => new Measurement<double>(_lastDeltaHours, HostTags), "hours", "Difference between quota spent and working hours elapsed");
+        _meter.CreateObservableGauge("vsn.rate_tracker.status_code", () => new Measurement<int>(_lastStatusValue, HostTags), description: "Current rate status: 0=Optimal, 1=WarningFast, 2=DangerFast, 3=Slow");
+        _meter.CreateObservableGauge("vsn.rate_tracker.total_work_hours", () => new Measurement<double>(_lastTotalWorkHours, HostTags), "hours", "Total working hours scheduled in the cycle");
+        _meter.CreateObservableGauge("vsn.rate_tracker.elapsed_work_hours", () => new Measurement<double>(_lastElapsedWorkHours, HostTags), "hours", "Elapsed working hours in the cycle");
+        _meter.CreateObservableGauge("vsn.rate_tracker.expected_ratio_percent", () => new Measurement<double>(_lastExpectedRatioPercent, HostTags), "%", "Expected quota consumption percentage based on elapsed working hours");
 
         // Anthropic detailed multi-window metrics
-        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.seven_day_utilization_percent", () => _lastSevenDayUtilization, "%", "Anthropic 7-day rolling window utilization percent");
-        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.seven_day_resets_in_hours", () => _lastSevenDayResetsInHours, "hours", "Hours remaining until Anthropic 7-day reset");
-        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.five_hour_utilization_percent", () => _lastFiveHourUtilization, "%", "Anthropic 5-hour window utilization percent");
-        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.five_hour_resets_in_hours", () => _lastFiveHourResetsInHours, "hours", "Hours remaining until Anthropic 5-hour reset");
-        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.seven_day_opus_utilization_percent", () => _lastSevenDayOpusUtilization, "%", "Anthropic 7-day Opus utilization percent");
-        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.seven_day_sonnet_utilization_percent", () => _lastSevenDaySonnetUtilization, "%", "Anthropic 7-day Sonnet utilization percent");
+        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.seven_day_utilization_percent", () => new Measurement<double>(_lastSevenDayUtilization, HostTags), "%", "Anthropic 7-day rolling window utilization percent");
+        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.seven_day_resets_in_hours", () => new Measurement<double>(_lastSevenDayResetsInHours, HostTags), "hours", "Hours remaining until Anthropic 7-day reset");
+        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.five_hour_utilization_percent", () => new Measurement<double>(_lastFiveHourUtilization, HostTags), "%", "Anthropic 5-hour window utilization percent");
+        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.five_hour_resets_in_hours", () => new Measurement<double>(_lastFiveHourResetsInHours, HostTags), "hours", "Hours remaining until Anthropic 5-hour reset");
+        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.seven_day_opus_utilization_percent", () => new Measurement<double>(_lastSevenDayOpusUtilization, HostTags), "%", "Anthropic 7-day Opus utilization percent");
+        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.seven_day_sonnet_utilization_percent", () => new Measurement<double>(_lastSevenDaySonnetUtilization, HostTags), "%", "Anthropic 7-day Sonnet utilization percent");
 
         // Anthropic extra usage & spend
-        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.extra_usage_enabled", () => _lastExtraUsageEnabled, description: "1 if extra usage credits are enabled, 0 otherwise");
-        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.extra_usage_utilization_percent", () => _lastExtraUsageUtilization, "%", "Extra usage credit utilization percent");
-        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.extra_usage_used_credits", () => _lastExtraUsageUsedCredits, description: "Extra usage credits used");
-        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.spend_used_amount", () => _lastSpendUsedAmount, description: "Spend budget amount used");
-        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.spend_percent", () => _lastSpendPercent, "%", "Spend budget percentage used");
+        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.extra_usage_enabled", () => new Measurement<double>(_lastExtraUsageEnabled, HostTags), description: "1 if extra usage credits are enabled, 0 otherwise");
+        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.extra_usage_utilization_percent", () => new Measurement<double>(_lastExtraUsageUtilization, HostTags), "%", "Extra usage credit utilization percent");
+        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.extra_usage_used_credits", () => new Measurement<double>(_lastExtraUsageUsedCredits, HostTags), description: "Extra usage credits used");
+        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.spend_used_amount", () => new Measurement<double>(_lastSpendUsedAmount, HostTags), description: "Spend budget amount used");
+        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.spend_percent", () => new Measurement<double>(_lastSpendPercent, HostTags), "%", "Spend budget percentage used");
     }
 
     public void Initialize(TelemetryConfig config)
@@ -125,11 +130,14 @@ public class TelemetryService : ITelemetryService
                 var machineName = Environment.MachineName;
 
                 var resourceBuilder = ResourceBuilder.CreateDefault()
-                    .AddService(serviceName, serviceVersion: "0.0.1")
+                    .AddService(serviceName, serviceVersion: "0.0.1", serviceInstanceId: machineName)
                     .AddAttributes(new[]
                     {
                         new KeyValuePair<string, object>("host.name", machineName),
+                        new KeyValuePair<string, object>("host_name", machineName),
+                        new KeyValuePair<string, object>("machine.name", machineName),
                         new KeyValuePair<string, object>("service.name", serviceName),
+                        new KeyValuePair<string, object>("service.instance.id", machineName),
                         new KeyValuePair<string, object>("service.version", "0.0.1")
                     })
                     .AddTelemetrySdk();
@@ -299,10 +307,16 @@ public class TelemetryService : ITelemetryService
         _lastSpendUsedAmount = usageResult.SpendUsedAmount ?? 0.0;
         _lastSpendPercent = usageResult.SpendPercent ?? 0.0;
 
-        _syncCounter.Add(1, new KeyValuePair<string, object?>("status", usageState.Status.ToString()));
-        _syncDuration.Record(durationMs);
+        _syncCounter.Add(1, 
+            new KeyValuePair<string, object?>("status", usageState.Status.ToString()),
+            new KeyValuePair<string, object?>("host_name", Environment.MachineName));
+        _syncDuration.Record(durationMs,
+            new KeyValuePair<string, object?>("status", usageState.Status.ToString()),
+            new KeyValuePair<string, object?>("host_name", Environment.MachineName));
 
         using var activity = _activitySource.StartActivity("SyncUsageCycle");
+        activity?.SetTag("host.name", Environment.MachineName);
+        activity?.SetTag("host_name", Environment.MachineName);
         activity?.SetTag("anthropic.percent_consumed", usageResult.PercentConsumed);
         activity?.SetTag("anthropic.seven_day_utilization", _lastSevenDayUtilization);
         activity?.SetTag("anthropic.seven_day_resets_in_hours", _lastSevenDayResetsInHours);
@@ -331,10 +345,16 @@ public class TelemetryService : ITelemetryService
         _lastStatusValue = (int)status;
         _lastSevenDayUtilization = percentConsumed;
 
-        _syncCounter.Add(1, new KeyValuePair<string, object?>("status", status.ToString()));
-        _syncDuration.Record(durationMs);
+        _syncCounter.Add(1, 
+            new KeyValuePair<string, object?>("status", status.ToString()),
+            new KeyValuePair<string, object?>("host_name", Environment.MachineName));
+        _syncDuration.Record(durationMs,
+            new KeyValuePair<string, object?>("status", status.ToString()),
+            new KeyValuePair<string, object?>("host_name", Environment.MachineName));
 
         using var activity = _activitySource.StartActivity("SyncUsageCycle");
+        activity?.SetTag("host.name", Environment.MachineName);
+        activity?.SetTag("host_name", Environment.MachineName);
         activity?.SetTag("anthropic.percent_consumed", percentConsumed);
         activity?.SetTag("anthropic.seven_day_utilization", percentConsumed);
         activity?.SetTag("vsn.delta_hours", deltaHours);
@@ -345,7 +365,8 @@ public class TelemetryService : ITelemetryService
     {
         _apiDuration.Record(durationMs,
             new KeyValuePair<string, object?>("status_code", statusCode),
-            new KeyValuePair<string, object?>("success", isSuccess));
+            new KeyValuePair<string, object?>("success", isSuccess),
+            new KeyValuePair<string, object?>("host_name", Environment.MachineName));
     }
 
     public void LogInfo(string message) => _logger?.LogInformation(message);

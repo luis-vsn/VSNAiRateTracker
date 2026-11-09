@@ -48,11 +48,18 @@ public class DayScheduleItemViewModel : INotifyPropertyChanged
         set => SetField(ref _dayName, value);
     }
 
-    public void RefreshDayName()
+    public string StartLabel => LocalizationService.Instance.GetString("Schedule.Start") + ":";
+    public string EndLabel => LocalizationService.Instance.GetString("Schedule.End") + ":";
+
+    public void RefreshLocalization()
     {
         _dayName = LocalizationService.Instance.GetString($"Day.{_day}");
         OnPropertyChanged(nameof(DayName));
+        OnPropertyChanged(nameof(StartLabel));
+        OnPropertyChanged(nameof(EndLabel));
     }
+
+    public void RefreshDayName() => RefreshLocalization();
 
     public bool IsEnabled
     {

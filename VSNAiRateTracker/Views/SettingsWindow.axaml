@@ -7,8 +7,8 @@
         x:Class="VSNAiRateTracker.Views.SettingsWindow"
         x:DataType="vm:SettingsViewModel"
         Title="{Binding [App.Title]}"
-        Width="680" Height="880"
-        MinWidth="640" MinHeight="700"
+        Width="750" Height="880"
+        MinWidth="720" MinHeight="700"
         CanResize="True"
         WindowStartupLocation="CenterScreen">
 
@@ -142,7 +142,7 @@
                         <ItemsControl ItemsSource="{Binding DaySchedules}" Margin="0,4,0,0">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <Grid ColumnDefinitions="110,*,*" Margin="0,4">
+                                    <Grid ColumnDefinitions="130,Auto,Auto" Margin="0,4">
                                         <CheckBox Grid.Column="0"
                                                   Content="{Binding DayName}"
                                                   IsChecked="{Binding IsEnabled}"
@@ -151,12 +151,13 @@
 
                                         <StackPanel Grid.Column="1"
                                                     Orientation="Horizontal"
-                                                    Spacing="6"
+                                                    Spacing="8"
                                                     IsEnabled="{Binding IsEnabled}"
-                                                    Margin="4,0">
-                                            <TextBlock Text="Entrada:"
+                                                    Margin="8,0,16,0">
+                                            <TextBlock Text="{Binding StartLabel}"
                                                        FontSize="11"
                                                        VerticalAlignment="Center"
+                                                       Width="50"
                                                        Foreground="{DynamicResource SystemBaseMediumColor}" />
                                             <TimePicker SelectedTime="{Binding StartTime}"
                                                         MinuteIncrement="15" />
@@ -164,12 +165,13 @@
 
                                         <StackPanel Grid.Column="2"
                                                     Orientation="Horizontal"
-                                                    Spacing="6"
+                                                    Spacing="8"
                                                     IsEnabled="{Binding IsEnabled}"
-                                                    Margin="4,0">
-                                            <TextBlock Text="Salida:"
+                                                    Margin="8,0,0,0">
+                                            <TextBlock Text="{Binding EndLabel}"
                                                        FontSize="11"
                                                        VerticalAlignment="Center"
+                                                       Width="50"
                                                        Foreground="{DynamicResource SystemBaseMediumColor}" />
                                             <TimePicker SelectedTime="{Binding EndTime}"
                                                         MinuteIncrement="15" />
@@ -219,19 +221,19 @@
                             <!-- Visual Color Pickers -->
                             <Grid Grid.Row="1" Grid.ColumnSpan="2" ColumnDefinitions="*,*,*,*" Margin="0,8,0,0">
                                 <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,6,0">
-                                    <TextBlock Text="Óptimo" FontSize="11" FontWeight="Medium" />
+                                    <TextBlock Text="{Binding [Threshold.ColorOptimal]}" FontSize="11" FontWeight="Medium" />
                                     <ColorPicker Color="{Binding ColorOptimal, Mode=TwoWay}" HorizontalAlignment="Stretch" />
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Spacing="4" Margin="3,0,3,0">
-                                    <TextBlock Text="Acelerado" FontSize="11" FontWeight="Medium" />
+                                    <TextBlock Text="{Binding [Threshold.ColorWarningFast]}" FontSize="11" FontWeight="Medium" />
                                     <ColorPicker Color="{Binding ColorWarningFast, Mode=TwoWay}" HorizontalAlignment="Stretch" />
                                 </StackPanel>
                                 <StackPanel Grid.Column="2" Spacing="4" Margin="3,0,3,0">
-                                    <TextBlock Text="Excesivo" FontSize="11" FontWeight="Medium" />
+                                    <TextBlock Text="{Binding [Threshold.ColorDangerFast]}" FontSize="11" FontWeight="Medium" />
                                     <ColorPicker Color="{Binding ColorDangerFast, Mode=TwoWay}" HorizontalAlignment="Stretch" />
                                 </StackPanel>
                                 <StackPanel Grid.Column="3" Spacing="4" Margin="6,0,0,0">
-                                    <TextBlock Text="Lento" FontSize="11" FontWeight="Medium" />
+                                    <TextBlock Text="{Binding [Threshold.ColorSlow]}" FontSize="11" FontWeight="Medium" />
                                     <ColorPicker Color="{Binding ColorSlow, Mode=TwoWay}" HorizontalAlignment="Stretch" />
                                 </StackPanel>
                             </Grid>
@@ -290,7 +292,7 @@
                             <Border Background="{DynamicResource SystemBaseLowColor}" CornerRadius="4" Padding="10,6" Margin="0,4,0,0">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                     <TextBlock Text="🖥️" VerticalAlignment="Center" />
-                                    <TextBlock Text="Nombre del equipo en métricas y trazas:" FontSize="11" Foreground="{DynamicResource SystemBaseMediumColor}" VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding [Telemetry.MachineNameLabel]}" FontSize="11" Foreground="{DynamicResource SystemBaseMediumColor}" VerticalAlignment="Center" />
                                     <TextBlock Text="{Binding MachineName}" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" />
                                 </StackPanel>
                             </Border>

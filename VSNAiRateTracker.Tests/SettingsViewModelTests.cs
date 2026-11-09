@@ -219,4 +219,24 @@ public class SettingsViewModelTests
         _sut.SelectedLanguage = "Español";
         _sut["App.Title"].Should().Contain("Configuración");
     }
+
+    [Fact]
+    public void LanguageSelection_UpdatesDayScheduleLabelsAndThresholdColorNames()
+    {
+        _sut.SelectedLanguage = "English";
+        _sut.DaySchedules[0].StartLabel.Should().Be("Start:");
+        _sut.DaySchedules[0].EndLabel.Should().Be("End:");
+        _sut["Threshold.ColorOptimal"].Should().Be("Optimal");
+        _sut["Threshold.ColorWarningFast"].Should().Be("Fast");
+        _sut["Threshold.ColorDangerFast"].Should().Be("Excessive");
+        _sut["Threshold.ColorSlow"].Should().Be("Slow");
+
+        _sut.SelectedLanguage = "Español";
+        _sut.DaySchedules[0].StartLabel.Should().Be("Entrada:");
+        _sut.DaySchedules[0].EndLabel.Should().Be("Salida:");
+        _sut["Threshold.ColorOptimal"].Should().Be("Óptimo");
+        _sut["Threshold.ColorWarningFast"].Should().Be("Acelerado");
+        _sut["Threshold.ColorDangerFast"].Should().Be("Excesivo");
+        _sut["Threshold.ColorSlow"].Should().Be("Lento");
+    }
 }
