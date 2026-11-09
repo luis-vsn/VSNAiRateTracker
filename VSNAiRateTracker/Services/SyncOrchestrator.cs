@@ -87,16 +87,20 @@ public class SyncOrchestrator : ISyncOrchestrator
                 _telemetryService?.Initialize(config.Telemetry);
             }
 
+            using var cycleSpan = _telemetryService?.StartActivity("SyncCycle");
+
             if (!config.HasCredentials)
             {
                 _trayManager.SetAlert("VSNAiRateTracker - Inicia sesión con Anthropic o configura una API Key", isCritical: false);
                 _telemetryService?.LogWarning("Sincronización omitida: sin credenciales configuradas.");
+                _telemetryService?.ForceFlush();
                 return;
             }
 
             // Proactively refresh OAuth token if it's nearing expiration
             if (config.AuthTokens != null && config.AuthTokens.IsExpired(TimeSpan.FromMinutes(5)))
             {
+                using var refreshSpan = _telemetryService?.StartActivity("RefreshToken");
                 var refreshedTokens = await _authService.RefreshTokensAsync(config.AuthTokens, cancellationToken);
                 if (refreshedTokens != null)
                 {
@@ -107,13 +111,20 @@ public class SyncOrchestrator : ISyncOrchestrator
                 {
                     _trayManager.SetAlert("VSNAiRateTracker - Sesión de Anthropic expirada. Haz clic para volver a iniciar sesión.", isCritical: true);
                     _telemetryService?.LogWarning("Sesión de Anthropic expirada; no se pudo refrescar.");
+                    _telemetryService?.ForceFlush();
                     return;
                 }
             }
 
+            AnthropicUsageResult result;
             var apiSw = System.Diagnostics.Stopwatch.StartNew();
-            var result = await _apiService.GetUsageAsync(config.ApiKey, config.AuthTokens, cancellationToken);
-            apiSw.Stop();
+            using (var apiSpan = _telemetryService?.StartActivity("GetUsageApi"))
+            {
+                result = await _apiService.GetUsageAsync(config.ApiKey, config.AuthTokens, cancellationToken);
+                apiSw.Stop();
+                apiSpan?.SetTag("http.status_code", result.StatusCode);
+                apiSpan?.SetTag("usage.success", result.IsSuccess);
+            }
             _telemetryService?.RecordApiCall(result.StatusCode != 0 ? result.StatusCode : (result.IsSuccess ? 200 : 500), result.IsSuccess, apiSw.ElapsedMilliseconds);
 
             if (!result.IsSuccess)
@@ -136,6 +147,7 @@ public class SyncOrchestrator : ISyncOrchestrator
                     {
                         _trayManager.SetAlert("VSNAiRateTracker - Sesión de Anthropic expirada. Haz clic para iniciar sesión de nuevo.", isCritical: true);
                         _telemetryService?.LogError($"Sesión expirada tras intento de refresco: {result.ErrorMessage}");
+                        _telemetryService?.ForceFlush();
                         return;
                     }
                 }
@@ -143,6 +155,7 @@ public class SyncOrchestrator : ISyncOrchestrator
                 {
                     _trayManager.SetAlert($"Error consultando Anthropic: {result.ErrorMessage}", isCritical: false);
                     _telemetryService?.LogError($"Error consultando Anthropic: {result.ErrorMessage}");
+                    _telemetryService?.ForceFlush();
                     return;
                 }
             }
@@ -159,7 +172,12 @@ public class SyncOrchestrator : ISyncOrchestrator
             _telemetryService?.RecordUsageSync(result.PercentConsumed, usageState.DeltaHours, usageState.Status, sw.ElapsedMilliseconds);
             _telemetryService?.LogInfo($"Sincronización completada: {result.PercentConsumed:F0}% consumido, desfase {usageState.DeltaHours:F1}h ({usageState.StatusDescription})");
 
+            cycleSpan?.SetTag("vsn.delta_hours", usageState.DeltaHours);
+            cycleSpan?.SetTag("vsn.status", usageState.Status.ToString());
+            cycleSpan?.SetTag("anthropic.percent_consumed", result.PercentConsumed);
+
             _trayManager.UpdateState(usageState);
+            _telemetryService?.ForceFlush();
         }
         catch (OperationCanceledException)
         {
@@ -169,6 +187,7 @@ public class SyncOrchestrator : ISyncOrchestrator
         {
             _telemetryService?.LogError($"Error inesperado durante la sincronización: {ex.Message}", ex);
             _trayManager.SetAlert($"Error inesperado: {ex.Message}", isCritical: true);
+            _telemetryService?.ForceFlush();
         }
     }
 
