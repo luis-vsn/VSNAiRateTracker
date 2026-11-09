@@ -151,5 +151,77 @@ public class SecureStorageServiceTests : IDisposable
 
         rawContent.Should().NotContain(secretKey);
     }
+
+    [Fact]
+    public async Task LoadConfig_WithBundledDefaults_AppliesTelemetryDefaultsWhenNotConfigured()
+    {
+        // Arrange
+        var defaultsFile = Path.Combine(_tempDirectory, "test-defaults.json");
+        var defaultsJson = """
+        {
+          "Telemetry": {
+            "Enabled": true,
+            "Endpoint": "https://otlp-gateway-prod.grafana.net/otlp",
+            "Headers": "Authorization=Basic dGVzdA==",
+            "ServiceName": "vsn-ai-rate-tracker",
+            "Protocol": "HttpProtobuf"
+          }
+        }
+        """;
+        await File.WriteAllTextAsync(defaultsFile, defaultsJson);
+
+        var service = new SecureStorageService(_tempDirectory, defaultsFilePath: defaultsFile);
+
+        // Act
+        var config = await service.LoadConfigAsync();
+
+        // Assert
+        config.Should().NotBeNull();
+        config.Telemetry.Should().NotBeNull();
+        config.Telemetry.Enabled.Should().BeTrue();
+        config.Telemetry.Endpoint.Should().Be("https://otlp-gateway-prod.grafana.net/otlp");
+        config.Telemetry.Headers.Should().Be("Authorization=Basic dGVzdA==");
+        config.Telemetry.ServiceName.Should().Be("vsn-ai-rate-tracker");
+        config.Telemetry.Protocol.Should().Be("HttpProtobuf");
+    }
+
+    [Fact]
+    public async Task LoadConfig_WithBundledDefaults_DoesNotOverwriteExistingUserConfig()
+    {
+        // Arrange
+        var defaultsFile = Path.Combine(_tempDirectory, "test-defaults.json");
+        var defaultsJson = """
+        {
+          "Telemetry": {
+            "Enabled": true,
+            "Endpoint": "https://bundled.example.com",
+            "Headers": "BundledAuth"
+          }
+        }
+        """;
+        await File.WriteAllTextAsync(defaultsFile, defaultsJson);
+
+        var service = new SecureStorageService(_tempDirectory, defaultsFilePath: defaultsFile);
+
+        // Save existing user config with custom endpoint and disabled telemetry
+        var existingConfig = new AppConfig
+        {
+            Telemetry = new TelemetryConfig
+            {
+                Enabled = false,
+                Endpoint = "https://custom-user-endpoint.example.com",
+                Headers = "UserAuth"
+            }
+        };
+        await service.SaveConfigAsync(existingConfig);
+
+        // Act
+        var loaded = await service.LoadConfigAsync();
+
+        // Assert
+        loaded.Telemetry.Enabled.Should().BeFalse();
+        loaded.Telemetry.Endpoint.Should().Be("https://custom-user-endpoint.example.com");
+        loaded.Telemetry.Headers.Should().Be("UserAuth");
+    }
 }
 

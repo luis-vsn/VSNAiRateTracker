@@ -481,6 +481,10 @@ $RECYCLE.BIN/
 # Vim temporary swap files
 *.swp
 
-# Packaging output
+# Packaging output & bundled credentials
 packaging/dist/
 packaging/windows/publish/
+defaults.json
+*defaults.json
+telemetry.defaults.json
+*.secrets.json

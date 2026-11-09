@@ -3,6 +3,8 @@
 param(
     [string]$Configuration = "Release",
     [string]$Version = "0.0.1",
+    [string]$TelemetryEndpoint = "",
+    [string]$TelemetryHeaders = "",
     [switch]$SkipInstaller
 )
 
@@ -40,6 +42,94 @@ dotnet publish $projectPath `
 
 if ($LASTEXITCODE -ne 0) {
     Write-Error "dotnet publish failed with exit code $LASTEXITCODE"
+}
+
+# 2.5 Inject default telemetry credentials if available (without hardcoding into git)
+$endpoint = $TelemetryEndpoint
+$headers = $TelemetryHeaders
+
+if ([string]::IsNullOrWhiteSpace($endpoint) -or [string]::IsNullOrWhiteSpace($headers)) {
+    $cfgPath = "$env:APPDATA\VSNAiRateTracker\config.enc"
+    $keyPath = "$env:APPDATA\VSNAiRateTracker\master.key"
+    if ((Test-Path $cfgPath) -and (Test-Path $keyPath)) {
+        try {
+            if ([Type]::GetType("System.Security.Cryptography.AesGcm") -ne $null) {
+                $keyBytes = [System.IO.File]::ReadAllBytes($keyPath)
+                $unprotected = [System.Security.Cryptography.ProtectedData]::Unprotect($keyBytes, $null, [System.Security.Cryptography.DataProtectionScope]::CurrentUser)
+                $enc = [System.IO.File]::ReadAllBytes($cfgPath)
+                $nonce = [byte[]]::new(12)
+                [Array]::Copy($enc, 1, $nonce, 0, 12)
+                $tag = [byte[]]::new(16)
+                [Array]::Copy($enc, 13, $tag, 0, 16)
+                $cipherLen = $enc.Length - 29
+                $cipher = [byte[]]::new($cipherLen)
+                [Array]::Copy($enc, 29, $cipher, 0, $cipherLen)
+                $aes = [System.Security.Cryptography.AesGcm]::new($unprotected, 16)
+                $plain = [byte[]]::new($cipherLen)
+                $aes.Decrypt($nonce, $cipher, $tag, $plain)
+                $localConfig = [System.Text.Encoding]::UTF8.GetString($plain) | ConvertFrom-Json
+                if ($localConfig.Telemetry -and $localConfig.Telemetry.Endpoint) {
+                    if ([string]::IsNullOrWhiteSpace($endpoint)) { $endpoint = $localConfig.Telemetry.Endpoint }
+                    if ([string]::IsNullOrWhiteSpace($headers)) { $headers = $localConfig.Telemetry.Headers }
+                }
+            } else {
+                # Fallback for Windows PowerShell 5.1: invoke pwsh if available
+                $pwshExe = (Get-Command pwsh -ErrorAction SilentlyContinue)?.Source
+                if ($pwshExe) {
+                    $jsonOut = & $pwshExe -NoProfile -Command "
+                        `$cfgPath = `"$cfgPath`"
+                        `$keyPath = `"$keyPath`"
+                        `$keyBytes = [System.IO.File]::ReadAllBytes(`$keyPath)
+                        `$unprotected = [System.Security.Cryptography.ProtectedData]::Unprotect(`$keyBytes, `$null, [System.Security.Cryptography.DataProtectionScope]::CurrentUser)
+                        `$enc = [System.IO.File]::ReadAllBytes(`$cfgPath)
+                        `$nonce = [byte[]]::new(12)
+                        [Array]::Copy(`$enc, 1, `$nonce, 0, 12)
+                        `$tag = [byte[]]::new(16)
+                        [Array]::Copy(`$enc, 13, `$tag, 0, 16)
+                        `$cipherLen = `$enc.Length - 29
+                        `$cipher = [byte[]]::new(`$cipherLen)
+                        [Array]::Copy(`$enc, 29, `$cipher, 0, `$cipherLen)
+                        `$aes = [System.Security.Cryptography.AesGcm]::new(`$unprotected, 16)
+                        `$plain = [byte[]]::new(`$cipherLen)
+                        `$aes.Decrypt(`$nonce, `$cipher, `$tag, `$plain)
+                        [System.Text.Encoding]::UTF8.GetString(`$plain)
+                    "
+                    if ($jsonOut) {
+                        $localConfig = $jsonOut | ConvertFrom-Json
+                        if ($localConfig.Telemetry -and $localConfig.Telemetry.Endpoint) {
+                            if ([string]::IsNullOrWhiteSpace($endpoint)) { $endpoint = $localConfig.Telemetry.Endpoint }
+                            if ([string]::IsNullOrWhiteSpace($headers)) { $headers = $localConfig.Telemetry.Headers }
+                        }
+                    }
+                }
+            }
+        } catch {
+            Write-Verbose "Could not read local config: $_"
+        }
+    }
+}
+
+if ([string]::IsNullOrWhiteSpace($endpoint)) {
+    $endpoint = [System.Environment]::GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT")
+}
+if ([string]::IsNullOrWhiteSpace($headers)) {
+    $headers = [System.Environment]::GetEnvironmentVariable("OTEL_EXPORTER_OTLP_HEADERS")
+}
+
+if (-not [string]::IsNullOrWhiteSpace($endpoint) -and -not [string]::IsNullOrWhiteSpace($headers)) {
+    $defaultsObj = @{
+        Telemetry = @{
+            Enabled = $true
+            Endpoint = $endpoint
+            Headers = $headers
+            ServiceName = "vsn-ai-rate-tracker"
+            Protocol = "HttpProtobuf"
+        }
+    }
+    $defaultsJson = $defaultsObj | ConvertTo-Json -Depth 5
+    $defaultsFile = Join-Path $publishDir "defaults.json"
+    [System.IO.File]::WriteAllText($defaultsFile, $defaultsJson, [System.Text.Encoding]::UTF8)
+    Write-Host "Injected bundled telemetry defaults into installer package (telemetry pre-activated)." -ForegroundColor Green
 }
 
 # 3. Create Portable ZIP

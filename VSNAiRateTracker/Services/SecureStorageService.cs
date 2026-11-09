@@ -18,12 +18,14 @@ public class SecureStorageService : ISecureStorageService
     private readonly string _storageDirectory;
     private readonly string _configFilePath;
     private readonly string _keyFilePath;
+    private readonly string _defaultsFilePath;
     private readonly IKeyProtectionProvider _keyProtectionProvider;
     private readonly byte[] _masterKey;
 
     public SecureStorageService(
         string? storageDirectory = null,
-        IKeyProtectionProvider? keyProtectionProvider = null)
+        IKeyProtectionProvider? keyProtectionProvider = null,
+        string? defaultsFilePath = null)
     {
         _storageDirectory = storageDirectory ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
@@ -31,6 +33,7 @@ public class SecureStorageService : ISecureStorageService
 
         _configFilePath = Path.Combine(_storageDirectory, "config.enc");
         _keyFilePath = Path.Combine(_storageDirectory, "master.key");
+        _defaultsFilePath = defaultsFilePath ?? Path.Combine(AppContext.BaseDirectory, "defaults.json");
         _keyProtectionProvider = keyProtectionProvider ?? new CrossPlatformKeyProtectionProvider();
 
         Directory.CreateDirectory(_storageDirectory);
@@ -141,21 +144,75 @@ public class SecureStorageService : ISecureStorageService
 
     public async Task<AppConfig> LoadConfigAsync(CancellationToken cancellationToken = default)
     {
+        AppConfig config;
         if (!File.Exists(_configFilePath))
         {
-            return new AppConfig();
+            config = new AppConfig();
+        }
+        else
+        {
+            try
+            {
+                var encryptedBytes = await File.ReadAllBytesAsync(_configFilePath, cancellationToken);
+                var decryptedBytes = DecryptData(encryptedBytes);
+                config = JsonSerializer.Deserialize<AppConfig>(decryptedBytes) ?? new AppConfig();
+            }
+            catch
+            {
+                config = new AppConfig();
+            }
+        }
+
+        ApplyBundledDefaults(config);
+        return config;
+    }
+
+    private void ApplyBundledDefaults(AppConfig config)
+    {
+        if (config.Telemetry != null && !string.IsNullOrWhiteSpace(config.Telemetry.Endpoint))
+        {
+            return;
+        }
+
+        // Look for bundled defaults.json next to the executable or custom path
+        if (!File.Exists(_defaultsFilePath))
+        {
+            return;
         }
 
         try
         {
-            var encryptedBytes = await File.ReadAllBytesAsync(_configFilePath, cancellationToken);
-            var decryptedBytes = DecryptData(encryptedBytes);
-            var config = JsonSerializer.Deserialize<AppConfig>(decryptedBytes);
-            return config ?? new AppConfig();
+            var json = File.ReadAllText(_defaultsFilePath);
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("Telemetry", out var telProp) && telProp.ValueKind == JsonValueKind.Object)
+            {
+                config.Telemetry ??= new TelemetryConfig();
+
+                if (telProp.TryGetProperty("Enabled", out var eProp) && (eProp.ValueKind == JsonValueKind.True || eProp.ValueKind == JsonValueKind.False))
+                {
+                    config.Telemetry.Enabled = eProp.GetBoolean();
+                }
+                if (telProp.TryGetProperty("Endpoint", out var epProp) && epProp.ValueKind == JsonValueKind.String)
+                {
+                    config.Telemetry.Endpoint = epProp.GetString() ?? string.Empty;
+                }
+                if (telProp.TryGetProperty("Headers", out var hProp) && hProp.ValueKind == JsonValueKind.String)
+                {
+                    config.Telemetry.Headers = hProp.GetString() ?? string.Empty;
+                }
+                if (telProp.TryGetProperty("ServiceName", out var sProp) && sProp.ValueKind == JsonValueKind.String)
+                {
+                    config.Telemetry.ServiceName = sProp.GetString() ?? "vsn-ai-rate-tracker";
+                }
+                if (telProp.TryGetProperty("Protocol", out var pProp) && pProp.ValueKind == JsonValueKind.String)
+                {
+                    config.Telemetry.Protocol = pProp.GetString() ?? "HttpProtobuf";
+                }
+            }
         }
         catch
         {
-            return new AppConfig();
+            // Silently ignore corrupted or unreadable defaults
         }
     }
 
