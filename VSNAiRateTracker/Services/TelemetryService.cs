@@ -142,6 +142,7 @@ public class TelemetryService : ITelemetryService
                         {
                             opt.Endpoint = logsUri;
                             opt.Protocol = protocol;
+                            opt.ExportProcessorType = ExportProcessorType.Simple;
                             if (!string.IsNullOrWhiteSpace(normalizedHeaders))
                             {
                                 opt.Headers = normalizedHeaders;
@@ -166,11 +167,32 @@ public class TelemetryService : ITelemetryService
     {
         if (string.IsNullOrWhiteSpace(headers)) return string.Empty;
         var trimmed = headers.Trim().Trim('"', '\'');
+
+        if (trimmed.StartsWith("Authorization:", StringComparison.OrdinalIgnoreCase))
+        {
+            var value = trimmed["Authorization:".Length..].TrimStart();
+            return $"Authorization={value}";
+        }
+
+        if (trimmed.StartsWith("Authorization=", StringComparison.OrdinalIgnoreCase))
+        {
+            return trimmed;
+        }
+
         if (trimmed.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase) ||
             trimmed.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
         {
             return $"Authorization={trimmed}";
         }
+
+        // If user entered "instanceId:token" (contains ':' but no '=')
+        if (trimmed.Contains(':') && !trimmed.Contains('='))
+        {
+            var bytes = System.Text.Encoding.UTF8.GetBytes(trimmed);
+            var b64 = Convert.ToBase64String(bytes);
+            return $"Authorization=Basic {b64}";
+        }
+
         return trimmed;
     }
 

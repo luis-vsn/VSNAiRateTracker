@@ -22,8 +22,11 @@ public class TelemetryServiceTests
     [Theory]
     [InlineData("Authorization=Basic abc123==", "Authorization=Basic abc123==")]
     [InlineData("\"Authorization=Basic abc123==\"", "Authorization=Basic abc123==")]
+    [InlineData("Authorization: Basic abc123==", "Authorization=Basic abc123==")]
+    [InlineData("Authorization: Bearer token123", "Authorization=Bearer token123")]
     [InlineData("Basic abc123==", "Authorization=Basic abc123==")]
     [InlineData("Bearer token123", "Authorization=Bearer token123")]
+    [InlineData("1981411:glc_token", "Authorization=Basic MTk4MTQxMTpnbGNfdG9rZW4=")]
     [InlineData("", "")]
     [InlineData(null, "")]
     public void NormalizeHeaders_EnsuresKeyEqualsValueFormat(string? raw, string expected)
