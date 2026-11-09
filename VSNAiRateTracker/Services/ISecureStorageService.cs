@@ -11,3 +11,4 @@ public interface ISecureStorageService
     byte[] EncryptData(byte[] plaintext);
     byte[] DecryptData(byte[] encryptedPayload);
 }
+

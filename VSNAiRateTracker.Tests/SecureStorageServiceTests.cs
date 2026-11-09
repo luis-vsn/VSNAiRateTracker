@@ -152,3 +152,4 @@ public class SecureStorageServiceTests : IDisposable
         rawContent.Should().NotContain(secretKey);
     }
 }
+

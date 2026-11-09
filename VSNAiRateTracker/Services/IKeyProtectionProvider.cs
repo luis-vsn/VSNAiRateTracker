@@ -38,3 +38,4 @@ public class WindowsDpapiProtectionProvider : IKeyProtectionProvider
         return (byte[])protectedKey.Clone();
     }
 }
+
