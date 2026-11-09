@@ -1,0 +1,144 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:VSNAiRateTracker.ViewModels"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="520" d:DesignHeight="640"
+        x:Class="VSNAiRateTracker.Views.SettingsWindow"
+        x:DataType="vm:SettingsViewModel"
+        Title="VSNAiRateTracker - Configuración"
+        Width="540" Height="660"
+        CanResize="False"
+        WindowStartupLocation="CenterScreen">
+
+    <Grid RowDefinitions="Auto,*,Auto" Margin="24">
+        <!-- Header -->
+        <StackPanel Grid.Row="0" Spacing="6" Margin="0,0,0,16">
+            <TextBlock Text="Configuración de VSNAiRateTracker"
+                       FontSize="20"
+                       FontWeight="SemiBold" />
+            <TextBlock Text="Monitorea en tiempo real tu consumo de cuota de Anthropic respecto a tu jornada laboral."
+                       FontSize="12"
+                       Foreground="{DynamicResource SystemBaseMediumColor}" />
+        </StackPanel>
+
+        <!-- Form content -->
+        <ScrollViewer Grid.Row="1">
+            <StackPanel Spacing="20">
+                <!-- Section: Anthropic Credentials -->
+                <Border BorderBrush="{DynamicResource SystemBaseLowColor}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="16">
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="Credenciales de Anthropic"
+                                   FontWeight="SemiBold"
+                                   FontSize="14" />
+
+                        <TextBlock Text="Introduce tu API Key de Anthropic (se almacenará encriptada con AES-GCM)."
+                                   FontSize="11"
+                                   Foreground="{DynamicResource SystemBaseMediumColor}" />
+
+                        <Grid ColumnDefinitions="*,Auto" Margin="0,4,0,0">
+                            <TextBox Grid.Column="0"
+                                     Text="{Binding ApiKey}"
+                                     PasswordChar="*"
+                                     PlaceholderText="sk-ant-..."
+                                     VerticalAlignment="Center" />
+                            <Button Grid.Column="1"
+                                    Content="Probar Conexión"
+                                    Margin="8,0,0,0"
+                                    Click="OnTestConnectionClick"
+                                    IsEnabled="{Binding !IsTestingConnection}"
+                                    VerticalAlignment="Center" />
+                        </Grid>
+
+                        <TextBlock Text="{Binding StatusMessage}"
+                                   FontSize="12"
+                                   FontWeight="Medium"
+                                   IsVisible="{Binding StatusMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Section: Working Schedule -->
+                <Border BorderBrush="{DynamicResource SystemBaseLowColor}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="16">
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="Horario Laboral Semanal"
+                                   FontWeight="SemiBold"
+                                   FontSize="14" />
+
+                        <TextBlock Text="Define los días y horas de tu jornada para calcular las horas de adelanto o atraso."
+                                   FontSize="11"
+                                   Foreground="{DynamicResource SystemBaseMediumColor}" />
+
+                        <TextBlock Text="Días laborables:" FontWeight="Medium" FontSize="12" Margin="0,4,0,0" />
+                        <WrapPanel Orientation="Horizontal">
+                            <CheckBox Content="Lun" IsChecked="{Binding IsMonday}" Margin="0,0,12,0" />
+                            <CheckBox Content="Mar" IsChecked="{Binding IsTuesday}" Margin="0,0,12,0" />
+                            <CheckBox Content="Mié" IsChecked="{Binding IsWednesday}" Margin="0,0,12,0" />
+                            <CheckBox Content="Jue" IsChecked="{Binding IsThursday}" Margin="0,0,12,0" />
+                            <CheckBox Content="Vie" IsChecked="{Binding IsFriday}" Margin="0,0,12,0" />
+                            <CheckBox Content="Sáb" IsChecked="{Binding IsSaturday}" Margin="0,0,12,0" />
+                            <CheckBox Content="Dom" IsChecked="{Binding IsSunday}" Margin="0,0,12,0" />
+                        </WrapPanel>
+
+                        <Grid ColumnDefinitions="*,*" Margin="0,6,0,0">
+                            <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,8,0">
+                                <TextBlock Text="Hora de entrada:" FontSize="12" FontWeight="Medium" />
+                                <TimePicker SelectedTime="{Binding StartTime}" MinuteIncrement="15" />
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="1" Spacing="4" Margin="8,0,0,0">
+                                <TextBlock Text="Hora de salida:" FontSize="12" FontWeight="Medium" />
+                                <TimePicker SelectedTime="{Binding EndTime}" MinuteIncrement="15" />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- Section: Sync Settings -->
+                <Border BorderBrush="{DynamicResource SystemBaseLowColor}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="16">
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="Sincronización en Segundo Plano"
+                                   FontWeight="SemiBold"
+                                   FontSize="14" />
+
+                        <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <TextBlock Text="Frecuencia de actualización" FontSize="12" FontWeight="Medium" />
+                                <TextBlock Text="Tiempo entre consultas al estado de la cuota" FontSize="11" Foreground="{DynamicResource SystemBaseMediumColor}" />
+                            </StackPanel>
+                            <NumericUpDown Grid.Column="1"
+                                           Value="{Binding SyncIntervalMinutes}"
+                                           Minimum="1"
+                                           Maximum="60"
+                                           FormatString="{}{0:0} min"
+                                           VerticalAlignment="Center"
+                                           Width="120" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- Footer Buttons -->
+        <Grid Grid.Row="2" ColumnDefinitions="*,Auto,Auto" Margin="0,16,0,0">
+            <Button Grid.Column="1"
+                    Content="Cancelar"
+                    Width="100"
+                    Margin="0,0,8,0"
+                    Click="OnCancelClick" />
+            <Button Grid.Column="2"
+                    Content="Guardar"
+                    Classes="accent"
+                    Width="110"
+                    Click="OnSaveClick" />
+        </Grid>
+    </Grid>
+</Window>
