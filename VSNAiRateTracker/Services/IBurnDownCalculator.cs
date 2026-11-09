@@ -10,6 +10,7 @@ public interface IBurnDownCalculator
         double percentConsumed,
         DateTimeOffset cycleStart,
         DateTimeOffset cycleEnd,
-        DateTimeOffset now);
+        DateTimeOffset now,
+        RateThresholdConfig? thresholds = null);
 }
 

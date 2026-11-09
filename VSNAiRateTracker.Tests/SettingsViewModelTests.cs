@@ -81,10 +81,34 @@ public class SettingsViewModelTests
         // Assert
         config.ApiKey.Should().Be("sk-ant-saved-key");
         config.SyncIntervalMinutes.Should().Be(10);
-        config.Schedule.Slots.Should().HaveCount(2);
-        config.Schedule.Slots[0].DayOfWeek.Should().Be(DayOfWeek.Monday);
-        config.Schedule.Slots[0].StartTime.Should().Be(new TimeOnly(9, 30));
-        config.Schedule.Slots[0].EndTime.Should().Be(new TimeOnly(18, 0));
+        config.Schedule.Slots.Where(s => s.IsEnabled).Should().HaveCount(2);
+        var monday = config.Schedule.Slots.First(s => s.DayOfWeek == DayOfWeek.Monday);
+        monday.StartTime.Should().Be(new TimeOnly(9, 30));
+        monday.EndTime.Should().Be(new TimeOnly(18, 0));
+    }
+
+    [Fact]
+    public void ToConfig_WithCustomThresholdsAndTelemetry_MapsProperties()
+    {
+        _sut.OptimalMarginHours = 0.8;
+        _sut.HighRateMarginHours = 4.0;
+        _sut.ColorOptimalHex = "#00FF00";
+        _sut.TelemetryEnabled = true;
+        _sut.TelemetryEndpoint = "https://otlp.grafana.com:4318";
+        _sut.TelemetryProtocol = "HttpProtobuf";
+        _sut.TelemetryHeaders = "Authorization=Basic test";
+        _sut.TelemetryServiceName = "my-tracker";
+
+        var config = _sut.ToConfig();
+
+        config.Thresholds.OptimalMarginHours.Should().Be(0.8);
+        config.Thresholds.HighRateMarginHours.Should().Be(4.0);
+        config.Thresholds.ColorOptimalHex.Should().Be("#00FF00");
+        config.Telemetry.Enabled.Should().BeTrue();
+        config.Telemetry.Endpoint.Should().Be("https://otlp.grafana.com:4318");
+        config.Telemetry.Protocol.Should().Be("HttpProtobuf");
+        config.Telemetry.Headers.Should().Be("Authorization=Basic test");
+        config.Telemetry.ServiceName.Should().Be("my-tracker");
     }
 
     [Fact]

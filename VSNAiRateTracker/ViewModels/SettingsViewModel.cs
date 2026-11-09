@@ -1,12 +1,72 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using VSNAiRateTracker.Models;
 using VSNAiRateTracker.Services;
 
 namespace VSNAiRateTracker.ViewModels;
+
+public class DayScheduleItemViewModel : INotifyPropertyChanged
+{
+    private DayOfWeek _day;
+    private string _dayName = string.Empty;
+    private bool _isEnabled;
+    private TimeSpan _startTime;
+    private TimeSpan _endTime;
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    public DayScheduleItemViewModel(DayOfWeek day, string dayName, bool isEnabled, TimeSpan start, TimeSpan end)
+    {
+        _day = day;
+        _dayName = dayName;
+        _isEnabled = isEnabled;
+        _startTime = start;
+        _endTime = end;
+    }
+
+    public DayOfWeek Day
+    {
+        get => _day;
+        set => SetField(ref _day, value);
+    }
+
+    public string DayName
+    {
+        get => _dayName;
+        set => SetField(ref _dayName, value);
+    }
+
+    public bool IsEnabled
+    {
+        get => _isEnabled;
+        set => SetField(ref _isEnabled, value);
+    }
+
+    public TimeSpan StartTime
+    {
+        get => _startTime;
+        set => SetField(ref _startTime, value);
+    }
+
+    public TimeSpan EndTime
+    {
+        get => _endTime;
+        set => SetField(ref _endTime, value);
+    }
+
+    protected bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
+    {
+        if (EqualityComparer<T>.Default.Equals(field, value)) return false;
+        field = value;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        return true;
+    }
+}
 
 public class SettingsViewModel : INotifyPropertyChanged
 {
@@ -17,16 +77,20 @@ public class SettingsViewModel : INotifyPropertyChanged
     private string _apiKey = string.Empty;
     private OAuthTokens? _authTokens;
     private int _syncIntervalMinutes = 5;
-    private bool _isMonday = true;
-    private bool _isTuesday = true;
-    private bool _isWednesday = true;
-    private bool _isThursday = true;
-    private bool _isFriday = true;
-    private bool _isSaturday = false;
-    private bool _isSunday = false;
-    private TimeSpan _startTime = new(9, 0, 0);
-    private TimeSpan _endTime = new(18, 30, 0);
     private string _timeZoneId = "Local";
+
+    private double _optimalMarginHours = 0.5;
+    private double _highRateMarginHours = 5.0;
+    private string _colorOptimalHex = "#2ECC71";
+    private string _colorWarningFastHex = "#F39C12";
+    private string _colorDangerFastHex = "#E74C3C";
+    private string _colorSlowHex = "#3498DB";
+
+    private bool _telemetryEnabled;
+    private string _telemetryEndpoint = string.Empty;
+    private string _telemetryProtocol = "HttpProtobuf";
+    private string _telemetryHeaders = string.Empty;
+    private string _telemetryServiceName = "vsn-ai-rate-tracker";
 
     private string _statusMessage = string.Empty;
     private bool _isStatusSuccess;
@@ -34,6 +98,8 @@ public class SettingsViewModel : INotifyPropertyChanged
     private bool _isLoggingIn;
     private string _sessionStatusText = "Sesión no iniciada.";
     private bool _isLoggedInWithWeb;
+
+    public ObservableCollection<DayScheduleItemViewModel> DaySchedules { get; } = new();
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -45,6 +111,20 @@ public class SettingsViewModel : INotifyPropertyChanged
         _storageService = storageService ?? throw new ArgumentNullException(nameof(storageService));
         _apiService = apiService ?? throw new ArgumentNullException(nameof(apiService));
         _authService = authService ?? throw new ArgumentNullException(nameof(authService));
+
+        InitializeDefaultDays();
+    }
+
+    private void InitializeDefaultDays()
+    {
+        DaySchedules.Clear();
+        DaySchedules.Add(new DayScheduleItemViewModel(DayOfWeek.Monday, "Lunes", true, new TimeSpan(9, 0, 0), new TimeSpan(18, 30, 0)));
+        DaySchedules.Add(new DayScheduleItemViewModel(DayOfWeek.Tuesday, "Martes", true, new TimeSpan(9, 0, 0), new TimeSpan(18, 30, 0)));
+        DaySchedules.Add(new DayScheduleItemViewModel(DayOfWeek.Wednesday, "Miércoles", true, new TimeSpan(9, 0, 0), new TimeSpan(18, 30, 0)));
+        DaySchedules.Add(new DayScheduleItemViewModel(DayOfWeek.Thursday, "Jueves", true, new TimeSpan(9, 0, 0), new TimeSpan(18, 30, 0)));
+        DaySchedules.Add(new DayScheduleItemViewModel(DayOfWeek.Friday, "Viernes", true, new TimeSpan(9, 0, 0), new TimeSpan(18, 30, 0)));
+        DaySchedules.Add(new DayScheduleItemViewModel(DayOfWeek.Saturday, "Sábado", false, new TimeSpan(9, 0, 0), new TimeSpan(14, 0, 0)));
+        DaySchedules.Add(new DayScheduleItemViewModel(DayOfWeek.Sunday, "Domingo", false, new TimeSpan(9, 0, 0), new TimeSpan(14, 0, 0)));
     }
 
     public string ApiKey
@@ -89,59 +169,137 @@ public class SettingsViewModel : INotifyPropertyChanged
         set => SetField(ref _syncIntervalMinutes, value);
     }
 
+    public double OptimalMarginHours
+    {
+        get => _optimalMarginHours;
+        set => SetField(ref _optimalMarginHours, value);
+    }
+
+    public double HighRateMarginHours
+    {
+        get => _highRateMarginHours;
+        set => SetField(ref _highRateMarginHours, value);
+    }
+
+    public string ColorOptimalHex
+    {
+        get => _colorOptimalHex;
+        set => SetField(ref _colorOptimalHex, value);
+    }
+
+    public string ColorWarningFastHex
+    {
+        get => _colorWarningFastHex;
+        set => SetField(ref _colorWarningFastHex, value);
+    }
+
+    public string ColorDangerFastHex
+    {
+        get => _colorDangerFastHex;
+        set => SetField(ref _colorDangerFastHex, value);
+    }
+
+    public string ColorSlowHex
+    {
+        get => _colorSlowHex;
+        set => SetField(ref _colorSlowHex, value);
+    }
+
+    public bool TelemetryEnabled
+    {
+        get => _telemetryEnabled;
+        set => SetField(ref _telemetryEnabled, value);
+    }
+
+    public string TelemetryEndpoint
+    {
+        get => _telemetryEndpoint;
+        set => SetField(ref _telemetryEndpoint, value);
+    }
+
+    public string TelemetryProtocol
+    {
+        get => _telemetryProtocol;
+        set => SetField(ref _telemetryProtocol, value);
+    }
+
+    public string TelemetryHeaders
+    {
+        get => _telemetryHeaders;
+        set => SetField(ref _telemetryHeaders, value);
+    }
+
+    public string TelemetryServiceName
+    {
+        get => _telemetryServiceName;
+        set => SetField(ref _telemetryServiceName, value);
+    }
+
+    // Compatibilidad hacia atrás para días individuales
     public bool IsMonday
     {
-        get => _isMonday;
-        set => SetField(ref _isMonday, value);
+        get => GetDaySchedule(DayOfWeek.Monday)?.IsEnabled ?? false;
+        set { var d = GetDaySchedule(DayOfWeek.Monday); if (d != null) d.IsEnabled = value; }
     }
 
     public bool IsTuesday
     {
-        get => _isTuesday;
-        set => SetField(ref _isTuesday, value);
+        get => GetDaySchedule(DayOfWeek.Tuesday)?.IsEnabled ?? false;
+        set { var d = GetDaySchedule(DayOfWeek.Tuesday); if (d != null) d.IsEnabled = value; }
     }
 
     public bool IsWednesday
     {
-        get => _isWednesday;
-        set => SetField(ref _isWednesday, value);
+        get => GetDaySchedule(DayOfWeek.Wednesday)?.IsEnabled ?? false;
+        set { var d = GetDaySchedule(DayOfWeek.Wednesday); if (d != null) d.IsEnabled = value; }
     }
 
     public bool IsThursday
     {
-        get => _isThursday;
-        set => SetField(ref _isThursday, value);
+        get => GetDaySchedule(DayOfWeek.Thursday)?.IsEnabled ?? false;
+        set { var d = GetDaySchedule(DayOfWeek.Thursday); if (d != null) d.IsEnabled = value; }
     }
 
     public bool IsFriday
     {
-        get => _isFriday;
-        set => SetField(ref _isFriday, value);
+        get => GetDaySchedule(DayOfWeek.Friday)?.IsEnabled ?? false;
+        set { var d = GetDaySchedule(DayOfWeek.Friday); if (d != null) d.IsEnabled = value; }
     }
 
     public bool IsSaturday
     {
-        get => _isSaturday;
-        set => SetField(ref _isSaturday, value);
+        get => GetDaySchedule(DayOfWeek.Saturday)?.IsEnabled ?? false;
+        set { var d = GetDaySchedule(DayOfWeek.Saturday); if (d != null) d.IsEnabled = value; }
     }
 
     public bool IsSunday
     {
-        get => _isSunday;
-        set => SetField(ref _isSunday, value);
+        get => GetDaySchedule(DayOfWeek.Sunday)?.IsEnabled ?? false;
+        set { var d = GetDaySchedule(DayOfWeek.Sunday); if (d != null) d.IsEnabled = value; }
     }
 
     public TimeSpan StartTime
     {
-        get => _startTime;
-        set => SetField(ref _startTime, value);
+        get => GetDaySchedule(DayOfWeek.Monday)?.StartTime ?? new TimeSpan(9, 0, 0);
+        set
+        {
+            foreach (var d in DaySchedules) d.StartTime = value;
+            OnPropertyChanged();
+        }
     }
 
     public TimeSpan EndTime
     {
-        get => _endTime;
-        set => SetField(ref _endTime, value);
+        get => GetDaySchedule(DayOfWeek.Monday)?.EndTime ?? new TimeSpan(18, 30, 0);
+        set
+        {
+            foreach (var d in DaySchedules) d.EndTime = value;
+            OnPropertyChanged();
+        }
     }
+
+    private DayScheduleItemViewModel? GetDaySchedule(DayOfWeek day) =>
+        DaySchedules.FirstOrDefault(d => d.Day == day);
 
     public string TimeZoneId
     {
@@ -176,30 +334,42 @@ public class SettingsViewModel : INotifyPropertyChanged
         SyncIntervalMinutes = config.SyncIntervalMinutes > 0 ? config.SyncIntervalMinutes : 5;
         TimeZoneId = config.Schedule?.TimeZoneId ?? "Local";
 
-        var days = new HashSet<DayOfWeek>();
-        TimeSpan? detectedStart = null;
-        TimeSpan? detectedEnd = null;
-
-        if (config.Schedule?.Slots != null)
+        if (config.Schedule?.Slots != null && config.Schedule.Slots.Count > 0)
         {
-            foreach (var slot in config.Schedule.Slots)
+            foreach (var item in DaySchedules)
             {
-                days.Add(slot.DayOfWeek);
-                detectedStart ??= slot.StartTime.ToTimeSpan();
-                detectedEnd ??= slot.EndTime.ToTimeSpan();
+                var matching = config.Schedule.Slots.FirstOrDefault(s => s.DayOfWeek == item.Day);
+                if (matching != null)
+                {
+                    item.IsEnabled = matching.IsEnabled;
+                    item.StartTime = matching.StartTime.ToTimeSpan();
+                    item.EndTime = matching.EndTime.ToTimeSpan();
+                }
+                else
+                {
+                    item.IsEnabled = false;
+                }
             }
         }
 
-        IsMonday = days.Contains(DayOfWeek.Monday);
-        IsTuesday = days.Contains(DayOfWeek.Tuesday);
-        IsWednesday = days.Contains(DayOfWeek.Wednesday);
-        IsThursday = days.Contains(DayOfWeek.Thursday);
-        IsFriday = days.Contains(DayOfWeek.Friday);
-        IsSaturday = days.Contains(DayOfWeek.Saturday);
-        IsSunday = days.Contains(DayOfWeek.Sunday);
+        if (config.Thresholds != null)
+        {
+            OptimalMarginHours = config.Thresholds.OptimalMarginHours;
+            HighRateMarginHours = config.Thresholds.HighRateMarginHours;
+            ColorOptimalHex = config.Thresholds.ColorOptimalHex;
+            ColorWarningFastHex = config.Thresholds.ColorWarningFastHex;
+            ColorDangerFastHex = config.Thresholds.ColorDangerFastHex;
+            ColorSlowHex = config.Thresholds.ColorSlowHex;
+        }
 
-        if (detectedStart.HasValue) StartTime = detectedStart.Value;
-        if (detectedEnd.HasValue) EndTime = detectedEnd.Value;
+        if (config.Telemetry != null)
+        {
+            TelemetryEnabled = config.Telemetry.Enabled;
+            TelemetryEndpoint = config.Telemetry.Endpoint ?? string.Empty;
+            TelemetryProtocol = config.Telemetry.Protocol ?? "HttpProtobuf";
+            TelemetryHeaders = config.Telemetry.Headers ?? string.Empty;
+            TelemetryServiceName = config.Telemetry.ServiceName ?? "vsn-ai-rate-tracker";
+        }
 
         UpdateSessionStatus();
     }
@@ -214,19 +384,34 @@ public class SettingsViewModel : INotifyPropertyChanged
             Schedule = new WorkSchedule
             {
                 TimeZoneId = TimeZoneId
+            },
+            Thresholds = new RateThresholdConfig
+            {
+                OptimalMarginHours = OptimalMarginHours,
+                HighRateMarginHours = HighRateMarginHours,
+                ColorOptimalHex = ColorOptimalHex,
+                ColorWarningFastHex = ColorWarningFastHex,
+                ColorDangerFastHex = ColorDangerFastHex,
+                ColorSlowHex = ColorSlowHex
+            },
+            Telemetry = new TelemetryConfig
+            {
+                Enabled = TelemetryEnabled,
+                Endpoint = TelemetryEndpoint.Trim(),
+                Protocol = TelemetryProtocol,
+                Headers = TelemetryHeaders.Trim(),
+                ServiceName = TelemetryServiceName.Trim()
             }
         };
 
-        var start = TimeOnly.FromTimeSpan(StartTime);
-        var end = TimeOnly.FromTimeSpan(EndTime);
-
-        if (IsMonday) config.Schedule.Slots.Add(new WorkTimeSlot(DayOfWeek.Monday, start, end));
-        if (IsTuesday) config.Schedule.Slots.Add(new WorkTimeSlot(DayOfWeek.Tuesday, start, end));
-        if (IsWednesday) config.Schedule.Slots.Add(new WorkTimeSlot(DayOfWeek.Wednesday, start, end));
-        if (IsThursday) config.Schedule.Slots.Add(new WorkTimeSlot(DayOfWeek.Thursday, start, end));
-        if (IsFriday) config.Schedule.Slots.Add(new WorkTimeSlot(DayOfWeek.Friday, start, end));
-        if (IsSaturday) config.Schedule.Slots.Add(new WorkTimeSlot(DayOfWeek.Saturday, start, end));
-        if (IsSunday) config.Schedule.Slots.Add(new WorkTimeSlot(DayOfWeek.Sunday, start, end));
+        foreach (var item in DaySchedules)
+        {
+            config.Schedule.Slots.Add(new WorkTimeSlot(
+                item.Day,
+                TimeOnly.FromTimeSpan(item.StartTime),
+                TimeOnly.FromTimeSpan(item.EndTime),
+                item.IsEnabled));
+        }
 
         return config;
     }
@@ -400,5 +585,10 @@ public class SettingsViewModel : INotifyPropertyChanged
         field = value;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         return true;
+    }
+
+    private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 }

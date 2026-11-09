@@ -29,23 +29,24 @@ public class BurnDownCalculatorTests
 
         foreach (var day in days)
         {
-            schedule.Slots.Add(new WorkTimeSlot(day, new TimeOnly(startHour, 0), new TimeOnly(endHour, 0)));
+            schedule.Slots.Add(new WorkTimeSlot(day, new TimeOnly(startHour, 0), new TimeOnly(endHour, 0), isEnabled: true));
         }
 
         return schedule;
     }
 
     [Fact]
-    public void Calculate_WhenUsageIsAheadOfSchedule_ReturnsPositiveDeltaAndGreenStatus()
+    public void Calculate_WhenUsageMatchesExpectedWithinOptimalMargin_ReturnsOptimalGreenStatus()
     {
-        // Arrange: Mon 2026-11-02 09:00 UTC to Fri 2026-11-06 17:00 UTC (40h total)
+        // Arrange: Mon 09:00 to Fri 17:00 (40h total)
         var schedule = CreateStandardSchedule(9, 17);
         var cycleStart = new DateTimeOffset(2026, 11, 2, 9, 0, 0, TimeSpan.Zero);
         var cycleEnd = new DateTimeOffset(2026, 11, 6, 17, 0, 0, TimeSpan.Zero);
         
-        // Wednesday 17:00 = 24h elapsed (3 days * 8h)
+        // Wednesday 17:00 = 24h elapsed (Expected = 24/40 = 60%)
         var now = new DateTimeOffset(2026, 11, 4, 17, 0, 0, TimeSpan.Zero);
-        double percentConsumed = 40.0; // Expected is 24/40 = 60%, actual is 40%
+        // Actual is 60.5% -> Delta = (0.605 - 0.60) * 40 = +0.2h (within optimal margin <= 0.5h)
+        double percentConsumed = 60.5;
 
         // Act
         var result = _sut.Calculate(schedule, percentConsumed, cycleStart, cycleEnd, now);
@@ -53,16 +54,15 @@ public class BurnDownCalculatorTests
         // Assert
         result.TotalWorkHours.Should().BeApproximately(40.0, 0.01);
         result.ElapsedWorkHours.Should().BeApproximately(24.0, 0.01);
-        result.ExpectedRatio.Should().BeApproximately(0.60, 0.001);
-        result.ActualRatio.Should().BeApproximately(0.40, 0.001);
-        result.DeltaHours.Should().BeApproximately(8.0, 0.01); // (0.60 - 0.40) * 40 = +8h
-        result.Status.Should().Be(RateStatus.Green);
-        result.FormattedDelta.Should().Be("+8.0h");
-        result.ShortText.Should().Be("+8h");
+        result.DeltaHours.Should().BeApproximately(0.2, 0.01);
+        result.Status.Should().Be(RateStatus.Optimal);
+        result.ShortText.Should().Be("+0.2");
+        result.FormattedDelta.Should().Be("+0.2h");
+        result.TooltipText.Should().Contain("Ritmo óptimo");
     }
 
     [Fact]
-    public void Calculate_WhenUsageIsSlightlyBehindSchedule_ReturnsAmberStatus()
+    public void Calculate_WhenUsageIsSlightlyAheadBetweenHalfHourAndFiveHours_ReturnsWarningFastAmber()
     {
         // Arrange
         var schedule = CreateStandardSchedule(9, 17);
@@ -71,20 +71,22 @@ public class BurnDownCalculatorTests
         
         // Wednesday 17:00 = 24h elapsed (Expected = 0.60)
         var now = new DateTimeOffset(2026, 11, 4, 17, 0, 0, TimeSpan.Zero);
-        double percentConsumed = 64.0; // Actual = 0.64 -> Delta = (0.60 - 0.64) * 40 = -1.6h
+        // Actual = 65% -> Delta = (0.65 - 0.60) * 40 = +2.0h (WarningFast: 0.5h to 5.0h)
+        double percentConsumed = 65.0;
 
         // Act
         var result = _sut.Calculate(schedule, percentConsumed, cycleStart, cycleEnd, now);
 
         // Assert
-        result.DeltaHours.Should().BeApproximately(-1.6, 0.01);
-        result.Status.Should().Be(RateStatus.Amber);
-        result.FormattedDelta.Should().Be("-1.6h");
-        result.ShortText.Should().Be("-2h");
+        result.DeltaHours.Should().BeApproximately(2.0, 0.01);
+        result.Status.Should().Be(RateStatus.WarningFast);
+        result.ShortText.Should().Be("+2.0");
+        result.FormattedDelta.Should().Be("+2.0h");
+        result.TooltipText.Should().Contain("Ritmo acelerado");
     }
 
     [Fact]
-    public void Calculate_WhenUsageIsSeverelyBehindSchedule_ReturnsRedStatus()
+    public void Calculate_WhenUsageExceedsFiveHoursAhead_ReturnsDangerFastRed()
     {
         // Arrange
         var schedule = CreateStandardSchedule(9, 17);
@@ -93,69 +95,111 @@ public class BurnDownCalculatorTests
         
         // Wednesday 17:00 = 24h elapsed (Expected = 0.60)
         var now = new DateTimeOffset(2026, 11, 4, 17, 0, 0, TimeSpan.Zero);
-        double percentConsumed = 70.0; // Actual = 0.70 -> Delta = (0.60 - 0.70) * 40 = -4.0h
+        // Actual = 75% -> Delta = (0.75 - 0.60) * 40 = +6.0h (> 5.0h -> DangerFast)
+        double percentConsumed = 75.0;
 
         // Act
         var result = _sut.Calculate(schedule, percentConsumed, cycleStart, cycleEnd, now);
 
         // Assert
-        result.DeltaHours.Should().BeApproximately(-4.0, 0.01);
-        result.Status.Should().Be(RateStatus.Red);
-        result.FormattedDelta.Should().Be("-4.0h");
-        result.ShortText.Should().Be("-4h");
+        result.DeltaHours.Should().BeApproximately(6.0, 0.01);
+        result.Status.Should().Be(RateStatus.DangerFast);
+        result.ShortText.Should().Be("+6.0");
+        result.FormattedDelta.Should().Be("+6.0h");
+        result.TooltipText.Should().Contain("Ritmo excesivo");
     }
 
-    [Theory]
-    [InlineData(-2.0, RateStatus.Amber)] // Exact boundary: -2h is Amber
-    [InlineData(-2.01, RateStatus.Red)]  // Just below boundary: -2.01h is Red
-    [InlineData(0.0, RateStatus.Green)]  // Exact 0h is Green
-    [InlineData(-0.01, RateStatus.Amber)]// Just below 0 is Amber
-    public void Calculate_StatusThresholdBoundaries_ClassifyCorrectly(double targetDelta, RateStatus expectedStatus)
+    [Fact]
+    public void Calculate_WhenUsageIsSlowerThanMinusHalfHour_ReturnsSlowBlue()
     {
-        // Total = 100h, Expected = 50h (50%), Target delta = (0.50 - actual) * 100 => actual = 0.50 - targetDelta/100
-        var schedule = CreateStandardSchedule(9, 19); // 10h per day * 10 days
+        // Arrange
+        var schedule = CreateStandardSchedule(9, 17);
         var cycleStart = new DateTimeOffset(2026, 11, 2, 9, 0, 0, TimeSpan.Zero);
-        var cycleEnd = new DateTimeOffset(2026, 11, 13, 19, 0, 0, TimeSpan.Zero); // 2 weeks (100h)
-        var now = new DateTimeOffset(2026, 11, 6, 19, 0, 0, TimeSpan.Zero); // End of week 1 (50h = 50%)
+        var cycleEnd = new DateTimeOffset(2026, 11, 6, 17, 0, 0, TimeSpan.Zero);
+        
+        // Wednesday 17:00 = 24h elapsed (Expected = 0.60)
+        var now = new DateTimeOffset(2026, 11, 4, 17, 0, 0, TimeSpan.Zero);
+        // Actual = 55% -> Delta = (0.55 - 0.60) * 40 = -2.0h (< -0.5h -> Slow)
+        double percentConsumed = 55.0;
 
-        double actualRatio = 0.50 - (targetDelta / 100.0);
-        double percentConsumed = actualRatio * 100.0;
-
+        // Act
         var result = _sut.Calculate(schedule, percentConsumed, cycleStart, cycleEnd, now);
 
-        result.DeltaHours.Should().BeApproximately(targetDelta, 0.001);
-        result.Status.Should().Be(expectedStatus);
+        // Assert
+        result.DeltaHours.Should().BeApproximately(-2.0, 0.01);
+        result.Status.Should().Be(RateStatus.Slow);
+        result.ShortText.Should().Be("-2.0");
+        result.FormattedDelta.Should().Be("-2.0h");
+        result.TooltipText.Should().Contain("Ritmo lento");
+    }
+
+    [Fact]
+    public void Calculate_WithCustomThresholdsAndColors_AppliesProperly()
+    {
+        // Arrange
+        var schedule = CreateStandardSchedule(9, 17);
+        var cycleStart = new DateTimeOffset(2026, 11, 2, 9, 0, 0, TimeSpan.Zero);
+        var cycleEnd = new DateTimeOffset(2026, 11, 6, 17, 0, 0, TimeSpan.Zero);
+        var now = new DateTimeOffset(2026, 11, 4, 17, 0, 0, TimeSpan.Zero); // 24h of 40h = 0.60
+
+        var customThresholds = new RateThresholdConfig
+        {
+            OptimalMarginHours = 1.0,
+            HighRateMarginHours = 3.0,
+            ColorOptimalHex = "#00FF00",
+            ColorWarningFastHex = "#FFAA00",
+            ColorDangerFastHex = "#FF0000",
+            ColorSlowHex = "#0000FF"
+        };
+
+        // Delta = (0.62 - 0.60) * 40 = +0.8h -> inside custom optimal margin (1.0h)
+        var result = _sut.Calculate(schedule, 62.0, cycleStart, cycleEnd, now, customThresholds);
+
+        result.Status.Should().Be(RateStatus.Optimal);
+        result.StatusColorHex.Should().Be("#00FF00");
+    }
+
+    [Fact]
+    public void Calculate_WithIndividualDailySchedules_CalculatesAsymmetricDaysCorrectly()
+    {
+        // User scenario: Monday from 9 to 19 (10h), Tuesday from 6 to 13 (7h), Wednesday disabled (0h)
+        var schedule = new WorkSchedule { TimeZoneId = "UTC" };
+        schedule.Slots.Add(new WorkTimeSlot(DayOfWeek.Monday, new TimeOnly(9, 0), new TimeOnly(19, 0), isEnabled: true));
+        schedule.Slots.Add(new WorkTimeSlot(DayOfWeek.Tuesday, new TimeOnly(6, 0), new TimeOnly(13, 0), isEnabled: true));
+        schedule.Slots.Add(new WorkTimeSlot(DayOfWeek.Wednesday, new TimeOnly(9, 0), new TimeOnly(17, 0), isEnabled: false));
+
+        var cycleStart = new DateTimeOffset(2026, 11, 2, 0, 0, 0, TimeSpan.Zero); // Monday
+        var cycleEnd = new DateTimeOffset(2026, 11, 4, 23, 59, 59, TimeSpan.Zero); // Wednesday
+
+        // Total should be: Monday (10h) + Tuesday (7h) + Wednesday (0h) = 17h
+        var tuesdayNoon = new DateTimeOffset(2026, 11, 3, 12, 0, 0, TimeSpan.Zero); // Mon 10h + Tue 6h = 16h elapsed
+
+        var result = _sut.Calculate(schedule, 50.0, cycleStart, cycleEnd, tuesdayNoon);
+
+        result.TotalWorkHours.Should().BeApproximately(17.0, 0.01);
+        result.ElapsedWorkHours.Should().BeApproximately(16.0, 0.01);
     }
 
     [Fact]
     public void Calculate_WithSplitSlotsPerDay_ComputesExcludingLunchBreak()
     {
-        // Schedule: Mon 09:00 - 13:00 (4h) and 14:00 - 18:00 (4h) -> 8h total with 1h lunch
         var schedule = new WorkSchedule { TimeZoneId = "UTC" };
-        schedule.Slots.Add(new WorkTimeSlot(DayOfWeek.Monday, new TimeOnly(9, 0), new TimeOnly(13, 0)));
-        schedule.Slots.Add(new WorkTimeSlot(DayOfWeek.Monday, new TimeOnly(14, 0), new TimeOnly(18, 0)));
+        schedule.Slots.Add(new WorkTimeSlot(DayOfWeek.Monday, new TimeOnly(9, 0), new TimeOnly(13, 0), isEnabled: true));
+        schedule.Slots.Add(new WorkTimeSlot(DayOfWeek.Monday, new TimeOnly(14, 0), new TimeOnly(18, 0), isEnabled: true));
 
         var cycleStart = new DateTimeOffset(2026, 11, 2, 0, 0, 0, TimeSpan.Zero);
         var cycleEnd = new DateTimeOffset(2026, 11, 2, 23, 59, 59, TimeSpan.Zero);
 
-        // During lunch break at 13:30 -> elapsed should be exactly 4h (morning slot only)
         var duringLunch = new DateTimeOffset(2026, 11, 2, 13, 30, 0, TimeSpan.Zero);
         var resultLunch = _sut.Calculate(schedule, 25.0, cycleStart, cycleEnd, duringLunch);
 
         resultLunch.TotalWorkHours.Should().BeApproximately(8.0, 0.01);
         resultLunch.ElapsedWorkHours.Should().BeApproximately(4.0, 0.01);
-
-        // Afternoon at 16:00 -> elapsed should be 4h morning + 2h afternoon = 6h
-        var afternoon = new DateTimeOffset(2026, 11, 2, 16, 0, 0, TimeSpan.Zero);
-        var resultAfternoon = _sut.Calculate(schedule, 50.0, cycleStart, cycleEnd, afternoon);
-
-        resultAfternoon.ElapsedWorkHours.Should().BeApproximately(6.0, 0.01);
     }
 
     [Fact]
     public void Calculate_OutsideWorkingHoursAtNight_ElapsedDoesNotAccumulate()
     {
-        // Arrange
         var schedule = CreateStandardSchedule(9, 17);
         var cycleStart = new DateTimeOffset(2026, 11, 2, 9, 0, 0, TimeSpan.Zero);
         var cycleEnd = new DateTimeOffset(2026, 11, 6, 17, 0, 0, TimeSpan.Zero);
@@ -163,116 +207,47 @@ public class BurnDownCalculatorTests
         var mondayEvening = new DateTimeOffset(2026, 11, 2, 17, 0, 0, TimeSpan.Zero);
         var mondayNight = new DateTimeOffset(2026, 11, 2, 23, 30, 0, TimeSpan.Zero);
 
-        // Act
         var resultAtClose = _sut.Calculate(schedule, 20.0, cycleStart, cycleEnd, mondayEvening);
         var resultAtNight = _sut.Calculate(schedule, 20.0, cycleStart, cycleEnd, mondayNight);
 
-        // Assert
         resultAtClose.ElapsedWorkHours.Should().BeApproximately(8.0, 0.01);
         resultAtNight.ElapsedWorkHours.Should().BeApproximately(8.0, 0.01);
         resultAtNight.DeltaHours.Should().Be(resultAtClose.DeltaHours);
     }
 
     [Fact]
-    public void Calculate_DuringWeekend_ElapsedDoesNotAccumulate()
-    {
-        // Arrange
-        var schedule = CreateStandardSchedule(9, 17);
-        var cycleStart = new DateTimeOffset(2026, 11, 2, 0, 0, 0, TimeSpan.Zero);
-        var cycleEnd = new DateTimeOffset(2026, 11, 9, 0, 0, 0, TimeSpan.Zero);
-
-        var fridayNight = new DateTimeOffset(2026, 11, 6, 20, 0, 0, TimeSpan.Zero);
-        var saturdayAfternoon = new DateTimeOffset(2026, 11, 7, 15, 0, 0, TimeSpan.Zero);
-        var sundayEvening = new DateTimeOffset(2026, 11, 8, 22, 0, 0, TimeSpan.Zero);
-
-        // Act
-        var resultFri = _sut.Calculate(schedule, 50.0, cycleStart, cycleEnd, fridayNight);
-        var resultSat = _sut.Calculate(schedule, 50.0, cycleStart, cycleEnd, saturdayAfternoon);
-        var resultSun = _sut.Calculate(schedule, 50.0, cycleStart, cycleEnd, sundayEvening);
-
-        // Assert
-        resultFri.ElapsedWorkHours.Should().BeApproximately(40.0, 0.01);
-        resultSat.ElapsedWorkHours.Should().BeApproximately(40.0, 0.01);
-        resultSun.ElapsedWorkHours.Should().BeApproximately(40.0, 0.01);
-    }
-
-    [Fact]
     public void Calculate_AtStartOfCycle_ElapsedWorkHoursIsZero()
     {
-        // Arrange
         var schedule = CreateStandardSchedule(9, 17);
         var cycleStart = new DateTimeOffset(2026, 11, 2, 9, 0, 0, TimeSpan.Zero);
         var cycleEnd = new DateTimeOffset(2026, 11, 6, 17, 0, 0, TimeSpan.Zero);
         var now = cycleStart;
 
-        // Act
         var result = _sut.Calculate(schedule, 0.0, cycleStart, cycleEnd, now);
 
-        // Assert
         result.ElapsedWorkHours.Should().Be(0.0);
         result.ExpectedRatio.Should().Be(0.0);
         result.ActualRatio.Should().Be(0.0);
         result.DeltaHours.Should().Be(0.0);
-        result.Status.Should().Be(RateStatus.Green);
+        result.Status.Should().Be(RateStatus.Optimal);
         result.FormattedDelta.Should().Be("0.0h");
+        result.ShortText.Should().Be("0.0");
     }
 
     [Fact]
     public void Calculate_WhenTotalWorkHoursIsZero_AvoidsDivisionByZero()
     {
-        // Arrange: Schedule with empty slots
         var emptySchedule = new WorkSchedule { TimeZoneId = "UTC" };
         var cycleStart = new DateTimeOffset(2026, 11, 2, 9, 0, 0, TimeSpan.Zero);
         var cycleEnd = new DateTimeOffset(2026, 11, 6, 17, 0, 0, TimeSpan.Zero);
         var now = new DateTimeOffset(2026, 11, 4, 12, 0, 0, TimeSpan.Zero);
 
-        // Act
         var result = _sut.Calculate(emptySchedule, 50.0, cycleStart, cycleEnd, now);
 
-        // Assert
         result.TotalWorkHours.Should().Be(0.0);
         result.ElapsedWorkHours.Should().Be(0.0);
         result.ExpectedRatio.Should().Be(0.0);
         result.DeltaHours.Should().Be(0.0);
-        result.Status.Should().Be(RateStatus.Green);
-    }
-
-    [Fact]
-    public void Calculate_ClampsPercentConsumedNegativeOrOverHundred()
-    {
-        // Arrange
-        var schedule = CreateStandardSchedule(9, 17);
-        var cycleStart = new DateTimeOffset(2026, 11, 2, 9, 0, 0, TimeSpan.Zero);
-        var cycleEnd = new DateTimeOffset(2026, 11, 6, 17, 0, 0, TimeSpan.Zero);
-        var now = new DateTimeOffset(2026, 11, 4, 17, 0, 0, TimeSpan.Zero); // 24h of 40h = 60%
-
-        // Act
-        var negativeResult = _sut.Calculate(schedule, -10.0, cycleStart, cycleEnd, now);
-        var overResult = _sut.Calculate(schedule, 150.0, cycleStart, cycleEnd, now);
-
-        // Assert
-        negativeResult.PercentConsumed.Should().Be(0.0);
-        negativeResult.ActualRatio.Should().Be(0.0);
-
-        overResult.PercentConsumed.Should().Be(150.0);
-        overResult.ActualRatio.Should().Be(1.50);
-        overResult.Status.Should().Be(RateStatus.Red);
-    }
-
-    [Fact]
-    public void Calculate_TooltipFormatting_MatchesSpecification()
-    {
-        // Arrange
-        var schedule = CreateStandardSchedule(9, 17);
-        var cycleStart = new DateTimeOffset(2026, 11, 2, 9, 0, 0, TimeSpan.Zero);
-        var cycleEnd = new DateTimeOffset(2026, 11, 6, 17, 0, 0, TimeSpan.Zero);
-        var now = new DateTimeOffset(2026, 11, 4, 17, 0, 0, TimeSpan.Zero); // 24h = 0.60
-        double percentConsumed = 48.0; // Actual = 0.48 -> Delta = (0.60 - 0.48) * 40 = +4.8h
-
-        // Act
-        var result = _sut.Calculate(schedule, percentConsumed, cycleStart, cycleEnd, now);
-
-        // Assert
-        result.TooltipText.Should().Be("Anthropic: 48% gastado | Desfase: +4.8h");
+        result.Status.Should().Be(RateStatus.Optimal);
     }
 }

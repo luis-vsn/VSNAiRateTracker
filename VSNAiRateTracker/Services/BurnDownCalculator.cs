@@ -13,9 +13,14 @@ public class BurnDownCalculator : IBurnDownCalculator
         double percentConsumed,
         DateTimeOffset cycleStart,
         DateTimeOffset cycleEnd,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        RateThresholdConfig? thresholds = null)
     {
         ArgumentNullException.ThrowIfNull(schedule);
+
+        var cfg = thresholds ?? new RateThresholdConfig();
+        var optimalMargin = Math.Max(0, cfg.OptimalMarginHours);
+        var highMargin = Math.Max(optimalMargin, cfg.HighRateMarginHours);
 
         var normalizedPercent = percentConsumed < 0 ? 0 : percentConsumed;
         var state = new UsageState
@@ -33,7 +38,8 @@ public class BurnDownCalculator : IBurnDownCalculator
             state.ExpectedRatio = 0;
             state.ActualRatio = normalizedPercent / 100.0;
             state.DeltaHours = 0;
-            state.Status = RateStatus.Green;
+            state.Status = RateStatus.Optimal;
+            state.StatusColorHex = cfg.ColorOptimalHex;
             return state;
         }
 
@@ -54,23 +60,32 @@ public class BurnDownCalculator : IBurnDownCalculator
         {
             var expectedRatio = elapsedHours / totalHours;
             var actualRatio = normalizedPercent / 100.0;
-            var deltaHours = Math.Round((expectedRatio - actualRatio) * totalHours, 6);
+            // DeltaHours: positive when burning faster than elapsed time, negative when burning slower
+            var deltaHours = Math.Round((actualRatio - expectedRatio) * totalHours, 6);
 
             state.ExpectedRatio = expectedRatio;
             state.ActualRatio = actualRatio;
             state.DeltaHours = deltaHours;
 
-            if (deltaHours >= -Epsilon)
+            if (Math.Abs(deltaHours) <= optimalMargin + Epsilon)
             {
-                state.Status = RateStatus.Green;
+                state.Status = RateStatus.Optimal;
+                state.StatusColorHex = cfg.ColorOptimalHex;
             }
-            else if (deltaHours >= -2.0 - Epsilon)
+            else if (deltaHours > optimalMargin && deltaHours <= highMargin + Epsilon)
             {
-                state.Status = RateStatus.Amber;
+                state.Status = RateStatus.WarningFast;
+                state.StatusColorHex = cfg.ColorWarningFastHex;
             }
-            else
+            else if (deltaHours > highMargin)
             {
-                state.Status = RateStatus.Red;
+                state.Status = RateStatus.DangerFast;
+                state.StatusColorHex = cfg.ColorDangerFastHex;
+            }
+            else // deltaHours < -optimalMargin
+            {
+                state.Status = RateStatus.Slow;
+                state.StatusColorHex = cfg.ColorSlowHex;
             }
         }
         else
@@ -78,7 +93,8 @@ public class BurnDownCalculator : IBurnDownCalculator
             state.ExpectedRatio = 0;
             state.ActualRatio = normalizedPercent / 100.0;
             state.DeltaHours = 0;
-            state.Status = RateStatus.Green;
+            state.Status = RateStatus.Optimal;
+            state.StatusColorHex = cfg.ColorOptimalHex;
         }
 
         return state;
@@ -100,7 +116,7 @@ public class BurnDownCalculator : IBurnDownCalculator
         while (currentDay <= lastDay)
         {
             var dayOfWeek = currentDay.DayOfWeek;
-            var matchingSlots = schedule.Slots.Where(s => s.DayOfWeek == dayOfWeek);
+            var matchingSlots = schedule.Slots.Where(s => s.DayOfWeek == dayOfWeek && s.IsEnabled);
 
             foreach (var slot in matchingSlots)
             {

@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using Avalonia;
 using FluentAssertions;
 using SkiaSharp;
@@ -17,12 +18,14 @@ public class IconRendererServiceTests
     }
 
     [Theory]
-    [InlineData(4.5, 0x2E, 0xCC, 0x71)]   // Green #2ECC71
-    [InlineData(0.0, 0x2E, 0xCC, 0x71)]   // Green #2ECC71
-    [InlineData(-1.2, 0xF3, 0x9C, 0x12)]  // Amber #F39C12
-    [InlineData(-2.0, 0xF3, 0x9C, 0x12)]  // Amber #F39C12
-    [InlineData(-2.1, 0xE7, 0x4C, 0x3C)]  // Red #E74C3C
-    [InlineData(-5.0, 0xE7, 0x4C, 0x3C)]  // Red #E74C3C
+    [InlineData(0.0, 0x2E, 0xCC, 0x71)]   // Green #2ECC71 (Optimal)
+    [InlineData(0.5, 0x2E, 0xCC, 0x71)]   // Green #2ECC71 (Optimal boundary)
+    [InlineData(-0.5, 0x2E, 0xCC, 0x71)]  // Green #2ECC71 (Optimal negative boundary)
+    [InlineData(2.5, 0xF3, 0x9C, 0x12)]   // Amber #F39C12 (WarningFast)
+    [InlineData(5.0, 0xF3, 0x9C, 0x12)]   // Amber #F39C12 (WarningFast boundary)
+    [InlineData(5.5, 0xE7, 0x4C, 0x3C)]   // Red #E74C3C (DangerFast)
+    [InlineData(-0.6, 0x34, 0x98, 0xDB)]  // Blue #3498DB (Slow)
+    [InlineData(-3.0, 0x34, 0x98, 0xDB)]  // Blue #3498DB (Slow)
     public void GetStatusColor_ReturnsExpectedColor(double delta, byte r, byte g, byte b)
     {
         var color = _sut.GetStatusColor(delta);
@@ -32,15 +35,14 @@ public class IconRendererServiceTests
     }
 
     [Fact]
-    public void RenderBadgeBitmap_GeneratesValid64x64Bitmap()
+    public void RenderBadgeBitmap_GeneratesValid64x64BitmapWithDecimalText()
     {
-        using var bitmap = _sut.RenderBadgeBitmap(3.0, "+3h", 64);
+        using var bitmap = _sut.RenderBadgeBitmap("+0.2", "#2ECC71", 64);
 
         bitmap.Should().NotBeNull();
         bitmap.Width.Should().Be(64);
         bitmap.Height.Should().Be(64);
 
-        // Center should not be transparent
         var centerPixel = bitmap.GetPixel(32, 32);
         centerPixel.Alpha.Should().BeGreaterThan(0);
     }
@@ -48,7 +50,7 @@ public class IconRendererServiceTests
     [Fact]
     public void RenderBadgePngBytes_GeneratesValidPngData()
     {
-        var bytes = _sut.RenderBadgePngBytes(-1.5, "-2h", 64);
+        var bytes = _sut.RenderBadgePngBytes("-0.1", "#3498DB", 64);
 
         bytes.Should().NotBeNull();
         bytes.Length.Should().BeGreaterThan(100);
@@ -61,13 +63,80 @@ public class IconRendererServiceTests
     }
 
     [Fact]
-    public void RenderBadgePngBytes_DifferentDeltaAndText_ProducesDistinctPayloads()
+    public void RenderAlertBitmap_WarningAndCritical_RendersValidNonEmptyBitmaps()
     {
-        var greenBytes = _sut.RenderBadgePngBytes(4.0, "+4h", 64);
-        var redBytes = _sut.RenderBadgePngBytes(-4.0, "-4h", 64);
+        using var warningBmp = _sut.RenderAlertBitmap(isCritical: false, 64);
+        using var criticalBmp = _sut.RenderAlertBitmap(isCritical: true, 64);
 
-        greenBytes.Should().NotBeNull();
-        redBytes.Should().NotBeNull();
-        greenBytes.Should().NotEqual(redBytes);
+        warningBmp.Should().NotBeNull();
+        warningBmp.Width.Should().Be(64);
+        warningBmp.Height.Should().Be(64);
+
+        criticalBmp.Should().NotBeNull();
+        criticalBmp.Width.Should().Be(64);
+        criticalBmp.Height.Should().Be(64);
+
+        var warningBytes = _sut.RenderAlertPngBytes(false, 64);
+        var criticalBytes = _sut.RenderAlertPngBytes(true, 64);
+
+        warningBytes.Should().NotEqual(criticalBytes);
+    }
+
+    [Fact]
+    public void RenderAppIconBitmap_RendersValidVLogo()
+    {
+        using var appIconBmp = _sut.RenderAppIconBitmap(64);
+
+        appIconBmp.Should().NotBeNull();
+        appIconBmp.Width.Should().Be(64);
+        appIconBmp.Height.Should().Be(64);
+
+        var pngBytes = _sut.RenderAppIconPngBytes(64);
+        pngBytes.Length.Should().BeGreaterThan(100);
+
+        // Also save to Assets directory for application packaging
+        var assetsDir = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "VSNAiRateTracker", "Assets"));
+        if (Directory.Exists(assetsDir))
+        {
+            File.WriteAllBytes(Path.Combine(assetsDir, "icon.png"), pngBytes);
+
+            int[] sizes = [256, 48, 32, 16];
+            var entries = new System.Collections.Generic.List<(int size, byte[] bytes)>();
+            foreach (var s in sizes)
+            {
+                entries.Add((s, _sut.RenderAppIconPngBytes(s)));
+            }
+
+            using var ms = new MemoryStream();
+            using var writer = new BinaryWriter(ms);
+
+            // ICO Header
+            writer.Write((ushort)0); // Reserved
+            writer.Write((ushort)1); // Type 1 = Icon
+            writer.Write((ushort)entries.Count);
+
+            // Directory entries
+            int offset = 6 + (16 * entries.Count);
+            foreach (var (size, bytes) in entries)
+            {
+                writer.Write((byte)(size >= 256 ? 0 : size));
+                writer.Write((byte)(size >= 256 ? 0 : size));
+                writer.Write((byte)0); // Palette
+                writer.Write((byte)0); // Reserved
+                writer.Write((ushort)1); // Planes
+                writer.Write((ushort)32); // Bits per pixel
+                writer.Write((uint)bytes.Length);
+                writer.Write((uint)offset);
+                offset += bytes.Length;
+            }
+
+            // Image data
+            foreach (var (_, bytes) in entries)
+            {
+                writer.Write(bytes);
+            }
+
+            File.WriteAllBytes(Path.Combine(assetsDir, "icon.ico"), ms.ToArray());
+        }
     }
 }

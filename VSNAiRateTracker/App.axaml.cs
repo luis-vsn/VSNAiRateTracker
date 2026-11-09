@@ -40,6 +40,7 @@ public partial class App : Application
             var calculator = new BurnDownCalculator();
             var iconRenderer = new IconRendererService();
             var trayManager = new TrayIconManager(iconRenderer);
+            var telemetryService = new TelemetryService();
 
             _orchestrator = new SyncOrchestrator(
                 _storageService,
@@ -48,7 +49,8 @@ public partial class App : Application
                 trayManager,
                 _authService,
                 openSettingsAction: () => Dispatcher.UIThread.Post(OpenSettingsWindow),
-                shutdownAction: () => Dispatcher.UIThread.Post(() => desktop.Shutdown()));
+                shutdownAction: () => Dispatcher.UIThread.Post(() => desktop.Shutdown()),
+                telemetryService: telemetryService);
 
             desktop.Exit += OnExit;
 
@@ -109,6 +111,16 @@ public partial class App : Application
         {
             _ = _orchestrator.SyncOnceAsync();
         });
+
+        try
+        {
+            var iconRenderer = new IconRendererService();
+            _settingsWindow.Icon = iconRenderer.RenderAppIconWindowIcon(64);
+        }
+        catch
+        {
+            // Fallback if platform icon loader is not initialized
+        }
 
         _settingsWindow.Closed += (_, _) => _settingsWindow = null;
         _settingsWindow.Show();

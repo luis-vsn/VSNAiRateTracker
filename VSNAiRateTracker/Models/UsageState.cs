@@ -4,9 +4,15 @@ namespace VSNAiRateTracker.Models;
 
 public enum RateStatus
 {
-    Green,   // DeltaHours >= 0 (En margen o positivo)
-    Amber,   // 0 > DeltaHours >= -2.0 (Retraso leve)
-    Red      // DeltaHours < -2.0 (Retraso severo)
+    Optimal,       // |DeltaHours| <= OptimalMargin (Verde)
+    WarningFast,   // OptimalMargin < DeltaHours <= HighRateMargin (Amarillo)
+    DangerFast,    // DeltaHours > HighRateMargin (Rojo)
+    Slow,          // DeltaHours < -OptimalMargin (Azul)
+
+    // Aliases para compatibilidad hacia atrás
+    Green = Optimal,
+    Amber = WarningFast,
+    Red = DangerFast
 }
 
 public class UsageState
@@ -22,6 +28,7 @@ public class UsageState
     public double ActualRatio { get; set; }
     public double DeltaHours { get; set; }
     public RateStatus Status { get; set; }
+    public string StatusColorHex { get; set; } = "#2ECC71";
 
     public string FormattedDelta
     {
@@ -39,16 +46,24 @@ public class UsageState
     {
         get
         {
-            var rounded = Math.Round(DeltaHours);
-            if (rounded > 0)
-                return $"+{rounded:F0}h";
-            if (rounded < 0)
-                return $"{rounded:F0}h";
-            return "0h";
+            if (DeltaHours > 0)
+                return $"+{DeltaHours:F1}";
+            if (DeltaHours < 0)
+                return $"{DeltaHours:F1}";
+            return "0.0";
         }
     }
 
+    public string StatusDescription => Status switch
+    {
+        RateStatus.Optimal => "Ritmo óptimo",
+        RateStatus.WarningFast => "Ritmo acelerado",
+        RateStatus.DangerFast => "Ritmo excesivo",
+        RateStatus.Slow => "Ritmo lento",
+        _ => "En margen"
+    };
+
     public string TooltipText =>
-        $"Anthropic: {PercentConsumed:F0}% gastado | Desfase: {FormattedDelta}";
+        $"Anthropic: {PercentConsumed:F0}% gastado | Desfase: {FormattedDelta} ({StatusDescription})";
 }
 

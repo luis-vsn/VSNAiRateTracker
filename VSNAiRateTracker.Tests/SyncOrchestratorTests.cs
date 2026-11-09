@@ -16,6 +16,7 @@ public class SyncOrchestratorTests
     private readonly Mock<IBurnDownCalculator> _calculatorMock;
     private readonly Mock<ITrayIconManager> _trayMock;
     private readonly Mock<IAnthropicAuthService> _authMock;
+    private readonly Mock<ITelemetryService> _telemetryMock;
 
     public SyncOrchestratorTests()
     {
@@ -24,6 +25,7 @@ public class SyncOrchestratorTests
         _calculatorMock = new Mock<IBurnDownCalculator>();
         _trayMock = new Mock<ITrayIconManager>();
         _authMock = new Mock<IAnthropicAuthService>();
+        _telemetryMock = new Mock<ITelemetryService>();
     }
 
     private SyncOrchestrator CreateSut(Action? openSettings = null, Action? shutdown = null)
@@ -35,7 +37,8 @@ public class SyncOrchestratorTests
             _trayMock.Object,
             _authMock.Object,
             openSettingsAction: openSettings,
-            shutdownAction: shutdown);
+            shutdownAction: shutdown,
+            telemetryService: _telemetryMock.Object);
     }
 
     [Fact]
@@ -51,7 +54,7 @@ public class SyncOrchestratorTests
         await sut.SyncOnceAsync();
 
         // Assert
-        _trayMock.Verify(t => t.SetStatus("LOG", It.Is<string>(s => s.Contains("Inicia sesión")), 0.0), Times.Once);
+        _trayMock.Verify(t => t.SetAlert(It.Is<string>(s => s.Contains("Inicia sesión")), false), Times.Once);
         _apiMock.Verify(a => a.GetUsageAsync(It.IsAny<string?>(), It.IsAny<OAuthTokens?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -87,8 +90,8 @@ public class SyncOrchestratorTests
         _apiMock.Setup(a => a.GetUsageAsync(config.ApiKey, newTokens, It.IsAny<CancellationToken>()))
             .ReturnsAsync(AnthropicUsageResult.Success(30.0, cycleStart, cycleEnd));
 
-        var calculatedState = new UsageState { DeltaHours = 2.0, Status = RateStatus.Green };
-        _calculatorMock.Setup(c => c.Calculate(schedule, 30.0, cycleStart, cycleEnd, It.IsAny<DateTimeOffset>()))
+        var calculatedState = new UsageState { DeltaHours = 2.0, Status = RateStatus.Optimal };
+        _calculatorMock.Setup(c => c.Calculate(schedule, 30.0, cycleStart, cycleEnd, It.IsAny<DateTimeOffset>(), It.IsAny<RateThresholdConfig>()))
             .Returns(calculatedState);
 
         var sut = CreateSut();
@@ -126,7 +129,7 @@ public class SyncOrchestratorTests
         await sut.SyncOnceAsync();
 
         // Assert
-        _trayMock.Verify(t => t.SetStatus("LOG", It.Is<string>(s => s.Contains("expirada")), -2.0), Times.Once);
+        _trayMock.Verify(t => t.SetAlert(It.Is<string>(s => s.Contains("expirada")), true), Times.Once);
         _apiMock.Verify(a => a.GetUsageAsync(It.IsAny<string?>(), It.IsAny<OAuthTokens?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -159,7 +162,7 @@ public class SyncOrchestratorTests
         await sut.SyncOnceAsync();
 
         // Assert
-        _trayMock.Verify(t => t.SetStatus("LOG", It.Is<string>(s => s.Contains("expirada")), -2.0), Times.Once);
+        _trayMock.Verify(t => t.SetAlert(It.Is<string>(s => s.Contains("expirada")), true), Times.Once);
     }
 
     [Fact]
@@ -181,7 +184,7 @@ public class SyncOrchestratorTests
         {
             PercentConsumed = 40.0,
             DeltaHours = 3.5,
-            Status = RateStatus.Green
+            Status = RateStatus.WarningFast
         };
 
         _calculatorMock.Setup(c => c.Calculate(
@@ -189,7 +192,8 @@ public class SyncOrchestratorTests
             40.0,
             cycleStart,
             cycleEnd,
-            It.IsAny<DateTimeOffset>()))
+            It.IsAny<DateTimeOffset>(),
+            It.IsAny<RateThresholdConfig>()))
             .Returns(calculatedState);
 
         var sut = CreateSut();
@@ -199,6 +203,7 @@ public class SyncOrchestratorTests
 
         // Assert
         _trayMock.Verify(t => t.UpdateState(calculatedState), Times.Once);
+        _telemetryMock.Verify(t => t.RecordUsageSync(40.0, 3.5, RateStatus.WarningFast, It.IsAny<long>()), Times.Once);
     }
 
     [Fact]

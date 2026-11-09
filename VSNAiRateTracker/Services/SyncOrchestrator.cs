@@ -12,6 +12,7 @@ public class SyncOrchestrator : ISyncOrchestrator
     private readonly IBurnDownCalculator _calculator;
     private readonly ITrayIconManager _trayManager;
     private readonly IAnthropicAuthService _authService;
+    private readonly ITelemetryService? _telemetryService;
     private readonly Action? _openSettingsAction;
     private readonly Action? _shutdownAction;
 
@@ -26,7 +27,8 @@ public class SyncOrchestrator : ISyncOrchestrator
         ITrayIconManager trayManager,
         IAnthropicAuthService authService,
         Action? openSettingsAction = null,
-        Action? shutdownAction = null)
+        Action? shutdownAction = null,
+        ITelemetryService? telemetryService = null)
     {
         _storageService = storageService ?? throw new ArgumentNullException(nameof(storageService));
         _apiService = apiService ?? throw new ArgumentNullException(nameof(apiService));
@@ -35,6 +37,7 @@ public class SyncOrchestrator : ISyncOrchestrator
         _authService = authService ?? throw new ArgumentNullException(nameof(authService));
         _openSettingsAction = openSettingsAction;
         _shutdownAction = shutdownAction;
+        _telemetryService = telemetryService;
     }
 
     public Task StartAsync(CancellationToken cancellationToken = default)
@@ -75,12 +78,19 @@ public class SyncOrchestrator : ISyncOrchestrator
 
     public async Task SyncOnceAsync(CancellationToken cancellationToken = default)
     {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             var config = await _storageService.LoadConfigAsync(cancellationToken);
+            if (config.Telemetry != null && config.Telemetry.Enabled)
+            {
+                _telemetryService?.Initialize(config.Telemetry);
+            }
+
             if (!config.HasCredentials)
             {
-                _trayManager.SetStatus("LOG", "VSNAiRateTracker - Inicia sesión con Anthropic o configura una API Key", 0.0);
+                _trayManager.SetAlert("VSNAiRateTracker - Inicia sesión con Anthropic o configura una API Key", isCritical: false);
+                _telemetryService?.LogWarning("Sincronización omitida: sin credenciales configuradas.");
                 return;
             }
 
@@ -95,12 +105,17 @@ public class SyncOrchestrator : ISyncOrchestrator
                 }
                 else
                 {
-                    _trayManager.SetStatus("LOG", "VSNAiRateTracker - Sesión de Anthropic expirada. Haz clic para volver a iniciar sesión.", -2.0);
+                    _trayManager.SetAlert("VSNAiRateTracker - Sesión de Anthropic expirada. Haz clic para volver a iniciar sesión.", isCritical: true);
+                    _telemetryService?.LogWarning("Sesión de Anthropic expirada; no se pudo refrescar.");
                     return;
                 }
             }
 
+            var apiSw = System.Diagnostics.Stopwatch.StartNew();
             var result = await _apiService.GetUsageAsync(config.ApiKey, config.AuthTokens, cancellationToken);
+            apiSw.Stop();
+            _telemetryService?.RecordApiCall(result.StatusCode != 0 ? result.StatusCode : (result.IsSuccess ? 200 : 500), result.IsSuccess, apiSw.ElapsedMilliseconds);
+
             if (!result.IsSuccess)
             {
                 if (result.IsSessionExpired)
@@ -119,13 +134,15 @@ public class SyncOrchestrator : ISyncOrchestrator
 
                     if (!result.IsSuccess)
                     {
-                        _trayManager.SetStatus("LOG", "VSNAiRateTracker - Sesión de Anthropic expirada. Haz clic para iniciar sesión de nuevo.", -2.0);
+                        _trayManager.SetAlert("VSNAiRateTracker - Sesión de Anthropic expirada. Haz clic para iniciar sesión de nuevo.", isCritical: true);
+                        _telemetryService?.LogError($"Sesión expirada tras intento de refresco: {result.ErrorMessage}");
                         return;
                     }
                 }
                 else
                 {
-                    _trayManager.SetStatus("ERR", $"Error consultando Anthropic: {result.ErrorMessage}", -3.0);
+                    _trayManager.SetAlert($"Error consultando Anthropic: {result.ErrorMessage}", isCritical: false);
+                    _telemetryService?.LogError($"Error consultando Anthropic: {result.ErrorMessage}");
                     return;
                 }
             }
@@ -135,7 +152,12 @@ public class SyncOrchestrator : ISyncOrchestrator
                 result.PercentConsumed,
                 result.CycleStart,
                 result.CycleEnd,
-                DateTimeOffset.UtcNow);
+                DateTimeOffset.UtcNow,
+                config.Thresholds);
+
+            sw.Stop();
+            _telemetryService?.RecordUsageSync(result.PercentConsumed, usageState.DeltaHours, usageState.Status, sw.ElapsedMilliseconds);
+            _telemetryService?.LogInfo($"Sincronización completada: {result.PercentConsumed:F0}% consumido, desfase {usageState.DeltaHours:F1}h ({usageState.StatusDescription})");
 
             _trayManager.UpdateState(usageState);
         }
@@ -145,7 +167,8 @@ public class SyncOrchestrator : ISyncOrchestrator
         }
         catch (Exception ex)
         {
-            _trayManager.SetStatus("ERR", $"Error inesperado: {ex.Message}", -3.0);
+            _telemetryService?.LogError($"Error inesperado durante la sincronización: {ex.Message}", ex);
+            _trayManager.SetAlert($"Error inesperado: {ex.Message}", isCritical: true);
         }
     }
 

@@ -33,3 +33,35 @@ jobs:
     - name: Run unit tests
       run: dotnet test --no-build -c Release --verbosity normal
 
+    - name: Install Inno Setup (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      run: |
+        choco install innosetup --no-progress -y
+
+    - name: Build Windows Installer & Portable Package
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      run: |
+        ./packaging/windows/build-installer.ps1
+
+    - name: Upload Windows Artifacts
+      if: matrix.os == 'windows-latest'
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-installer-and-portable
+        path: packaging/dist/*
+
+    - name: Build macOS DMG (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        chmod +x ./packaging/macos/build-dmg.sh
+        ./packaging/macos/build-dmg.sh Release 1.0.0 osx-arm64
+
+    - name: Upload macOS Artifacts
+      if: matrix.os == 'macos-latest'
+      uses: actions/upload-artifact@v4
+      with:
+        name: macos-dmg
+        path: packaging/dist/*.dmg
+

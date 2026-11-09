@@ -78,7 +78,47 @@ public class TrayIconManager : ITrayIconManager
     public void UpdateState(UsageState state)
     {
         ArgumentNullException.ThrowIfNull(state);
-        SetStatus(state.ShortText, state.TooltipText, state.DeltaHours);
+
+        if (_isDisposed)
+            return;
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_trayIcon == null)
+                return;
+
+            try
+            {
+                _trayIcon.Icon = _iconRenderer.RenderBadgeWindowIcon(state.ShortText, state.StatusColorHex, 64);
+                _trayIcon.ToolTipText = state.TooltipText;
+            }
+            catch
+            {
+                // Silently avoid UI thread crashes if display is being torn down
+            }
+        });
+    }
+
+    public void SetAlert(string tooltip, bool isCritical = false)
+    {
+        if (_isDisposed)
+            return;
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_trayIcon == null)
+                return;
+
+            try
+            {
+                _trayIcon.Icon = _iconRenderer.RenderAlertWindowIcon(isCritical, 64);
+                _trayIcon.ToolTipText = tooltip;
+            }
+            catch
+            {
+                // Silently avoid UI thread crashes if display is being torn down
+            }
+        });
     }
 
     public void SetStatus(string shortText, string tooltip, double deltaHours)
