@@ -51,3 +51,4 @@ public class UsageState
     public string TooltipText =>
         $"Anthropic: {PercentConsumed:F0}% gastado | Desfase: {FormattedDelta}";
 }
+

@@ -79,3 +79,4 @@ public class AppConfig
     public int SyncIntervalMinutes { get; set; } = 5;
     public WorkSchedule Schedule { get; set; } = WorkSchedule.CreateDefault();
 }
+

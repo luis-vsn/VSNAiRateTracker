@@ -12,3 +12,4 @@ public interface IBurnDownCalculator
         DateTimeOffset cycleEnd,
         DateTimeOffset now);
 }
+
