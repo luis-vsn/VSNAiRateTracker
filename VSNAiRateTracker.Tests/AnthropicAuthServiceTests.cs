@@ -48,6 +48,9 @@ public class AnthropicAuthServiceTests
         // Assert
         capturedAuthUrl.Should().Contain("claude.ai/oauth/authorize");
         capturedAuthUrl.Should().Contain("code_challenge=");
+        capturedAuthUrl.Should().Contain("scope=");
+        capturedAuthUrl.Should().Contain("code=true");
+        capturedAuthUrl.Should().Contain("client_id=test-client");
         result.Should().NotBeNull();
         result.AccessToken.Should().Be("at-12345");
         result.RefreshToken.Should().Be("rt-67890");

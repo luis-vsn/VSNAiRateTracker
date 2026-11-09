@@ -64,11 +64,23 @@ public partial class App : Application
 
     private async Task CheckInitialConfigurationAsync()
     {
-        if (_storageService == null) return;
+        if (_storageService == null || _authService == null) return;
 
         var config = await _storageService.LoadConfigAsync();
         if (!config.HasCredentials)
         {
+            var imported = await _authService.TryImportFromClaudeCliAsync();
+            if (imported != null)
+            {
+                config.AuthTokens = imported;
+                await _storageService.SaveConfigAsync(config);
+                if (_orchestrator != null)
+                {
+                    _ = _orchestrator.SyncOnceAsync();
+                }
+                return;
+            }
+
             await Dispatcher.UIThread.InvokeAsync(OpenSettingsWindow);
         }
     }

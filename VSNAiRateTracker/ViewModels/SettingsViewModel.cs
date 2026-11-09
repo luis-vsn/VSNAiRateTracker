@@ -262,6 +262,45 @@ public class SettingsViewModel : INotifyPropertyChanged
         }
     }
 
+    public async Task<bool> ImportFromClaudeCliAsync()
+    {
+        IsLoggingIn = true;
+        StatusMessage = "Buscando credenciales activas de Claude Code en el equipo...";
+        IsStatusSuccess = true;
+
+        try
+        {
+            var tokens = await _authService.TryImportFromClaudeCliAsync();
+            if (tokens != null)
+            {
+                AuthTokens = tokens;
+                var config = ToConfig();
+                config.AuthTokens = tokens;
+                await _storageService.SaveConfigAsync(config);
+
+                StatusMessage = "✓ Credenciales de Claude Code importadas y verificadas con éxito.";
+                IsStatusSuccess = true;
+                return true;
+            }
+            else
+            {
+                StatusMessage = "No se encontraron credenciales en ~/.claude/.credentials.json. Inicia sesión con el botón Web.";
+                IsStatusSuccess = false;
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"✗ Error al importar sesión: {ex.Message}";
+            IsStatusSuccess = false;
+            return false;
+        }
+        finally
+        {
+            IsLoggingIn = false;
+        }
+    }
+
     public async Task LogoutWebAsync()
     {
         AuthTokens = null;

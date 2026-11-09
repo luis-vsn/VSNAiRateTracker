@@ -12,22 +12,18 @@ using VSNAiRateTracker.Models;
 
 namespace VSNAiRateTracker.Services;
 
-public interface IAnthropicAuthService
-{
-    Task<OAuthTokens> StartInteractiveLoginAsync(CancellationToken cancellationToken = default);
-    Task<OAuthTokens?> RefreshTokensAsync(OAuthTokens currentTokens, CancellationToken cancellationToken = default);
-}
-
 public class AnthropicAuthService : IAnthropicAuthService
 {
-    private const string DefaultClientId = "vsn-ai-rate-tracker";
+    private const string DefaultClientId = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
     private const string DefaultAuthEndpoint = "https://claude.ai/oauth/authorize";
-    private const string DefaultTokenEndpoint = "https://api.anthropic.com/oauth/token";
+    private const string DefaultTokenEndpoint = "https://platform.claude.com/v1/oauth/token";
+    private const string DefaultScope = "user:file_upload user:inference user:mcp_servers user:plugins user:profile user:sessions:claude_code";
 
     private readonly HttpClient _httpClient;
     private readonly string _clientId;
     private readonly string _authEndpoint;
     private readonly string _tokenEndpoint;
+    private readonly string _scope;
 
     // Pluggable delegates for testability
     private readonly Func<string, Task>? _browserLauncher;
@@ -38,6 +34,7 @@ public class AnthropicAuthService : IAnthropicAuthService
         string? clientId = null,
         string? authEndpoint = null,
         string? tokenEndpoint = null,
+        string? scope = null,
         Func<string, Task>? browserLauncher = null,
         Func<int, string, CancellationToken, Task<(string code, string state)>>? codeReceiver = null)
     {
@@ -45,6 +42,7 @@ public class AnthropicAuthService : IAnthropicAuthService
         _clientId = clientId ?? DefaultClientId;
         _authEndpoint = authEndpoint ?? DefaultAuthEndpoint;
         _tokenEndpoint = tokenEndpoint ?? DefaultTokenEndpoint;
+        _scope = scope ?? DefaultScope;
         _browserLauncher = browserLauncher;
         _codeReceiver = codeReceiver;
     }
@@ -56,9 +54,9 @@ public class AnthropicAuthService : IAnthropicAuthService
         var codeChallenge = GenerateCodeChallenge(codeVerifier);
         var state = GenerateRandomString(32);
         int localPort = 54321;
-        var redirectUri = $"http://localhost:{localPort}/callback/";
+        var redirectUri = $"http://localhost:{localPort}/callback";
 
-        var authUrl = $"{_authEndpoint}?response_type=code&client_id={Uri.EscapeDataString(_clientId)}&redirect_uri={Uri.EscapeDataString(redirectUri)}&code_challenge={Uri.EscapeDataString(codeChallenge)}&code_challenge_method=S256&state={Uri.EscapeDataString(state)}";
+        var authUrl = $"{_authEndpoint}?response_type=code&code=true&client_id={Uri.EscapeDataString(_clientId)}&redirect_uri={Uri.EscapeDataString(redirectUri)}&scope={Uri.EscapeDataString(_scope)}&code_challenge={Uri.EscapeDataString(codeChallenge)}&code_challenge_method=S256&state={Uri.EscapeDataString(state)}";
 
         // 2. Launch browser & receive redirect
         Task<(string code, string state)> receiveTask = _codeReceiver != null
@@ -129,7 +127,7 @@ public class AnthropicAuthService : IAnthropicAuthService
 
             var accessToken = root.GetProperty("access_token").GetString() ?? string.Empty;
             var refreshToken = root.TryGetProperty("refresh_token", out var rt) ? rt.GetString() ?? currentTokens.RefreshToken : currentTokens.RefreshToken;
-            var expiresIn = root.TryGetProperty("expires_in", out var exp) ? exp.GetInt32() : 3600;
+            var expiresIn = root.TryGetProperty("expires_in", out var exp) ? exp.GetInt32() : 28800;
 
             return new OAuthTokens
             {
@@ -140,6 +138,67 @@ public class AnthropicAuthService : IAnthropicAuthService
             };
         }
         catch (HttpRequestException)
+        {
+            return null;
+        }
+    }
+
+    public async Task<OAuthTokens?> TryImportFromClaudeCliAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var credentialsPath = Path.Combine(userProfile, ".claude", ".credentials.json");
+
+            if (!File.Exists(credentialsPath))
+            {
+                return null;
+            }
+
+            var json = await File.ReadAllTextAsync(credentialsPath, cancellationToken);
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (!root.TryGetProperty("claudeAiOauth", out var oauthSection))
+            {
+                return null;
+            }
+
+            var accessToken = oauthSection.TryGetProperty("accessToken", out var at) ? at.GetString() ?? string.Empty : string.Empty;
+            var refreshToken = oauthSection.TryGetProperty("refreshToken", out var rt) ? rt.GetString() ?? string.Empty : string.Empty;
+
+            DateTimeOffset expiresAt = DateTimeOffset.UtcNow;
+            if (oauthSection.TryGetProperty("expiresAt", out var expVal) && expVal.TryGetInt64(out var expMs))
+            {
+                expiresAt = DateTimeOffset.FromUnixTimeMilliseconds(expMs);
+            }
+
+            if (string.IsNullOrWhiteSpace(accessToken) && string.IsNullOrWhiteSpace(refreshToken))
+            {
+                return null;
+            }
+
+            var tokens = new OAuthTokens
+            {
+                AccessToken = accessToken,
+                RefreshToken = refreshToken,
+                ExpiresAt = expiresAt,
+                TokenType = "Bearer"
+            };
+
+            // If the token is already expired, refresh it automatically using the refreshToken
+            if (tokens.IsExpired() && !string.IsNullOrWhiteSpace(tokens.RefreshToken))
+            {
+                var refreshed = await RefreshTokensAsync(tokens, cancellationToken);
+                if (refreshed != null)
+                {
+                    return refreshed;
+                }
+            }
+
+            return tokens;
+        }
+        catch
         {
             return null;
         }
@@ -158,7 +217,7 @@ public class AnthropicAuthService : IAnthropicAuthService
 
         var accessToken = root.GetProperty("access_token").GetString() ?? string.Empty;
         var refreshToken = root.TryGetProperty("refresh_token", out var rt) ? rt.GetString() ?? string.Empty : string.Empty;
-        var expiresIn = root.TryGetProperty("expires_in", out var exp) ? exp.GetInt32() : 3600;
+        var expiresIn = root.TryGetProperty("expires_in", out var exp) ? exp.GetInt32() : 28800;
 
         return new OAuthTokens
         {
@@ -184,7 +243,7 @@ public class AnthropicAuthService : IAnthropicAuthService
                 var code = req.QueryString["code"] ?? string.Empty;
                 var state = req.QueryString["state"] ?? string.Empty;
 
-                var responseString = "<html><body style='font-family:sans-serif;text-align:center;padding:40px;'><h2>Autenticacion con Anthropic completada</h2><p>Ya puedes volver a VSNAiRateTracker.</p></body></html>";
+                var responseString = "<html><head><meta charset='utf-8'/><title>Autenticado</title></head><body style='font-family:Segoe UI,sans-serif;text-align:center;padding:50px;'><h2 style='color:#2ECC71;'>¡Autenticación con Anthropic completada!</h2><p>Ya puedes cerrar esta pestaña y volver a VSNAiRateTracker.</p><script>window.close();</script></body></html>";
                 var buffer = Encoding.UTF8.GetBytes(responseString);
                 context.Response.ContentLength64 = buffer.Length;
                 context.Response.ContentType = "text/html; charset=utf-8";

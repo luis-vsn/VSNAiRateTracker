@@ -35,6 +35,18 @@ public partial class SettingsWindow : Window
         }
     }
 
+    private async void OnImportClaudeClick(object? sender, RoutedEventArgs e)
+    {
+        if (_viewModel != null)
+        {
+            var success = await _viewModel.ImportFromClaudeCliAsync();
+            if (success)
+            {
+                _onSavedCallback?.Invoke();
+            }
+        }
+    }
+
     private async void OnLogoutWebClick(object? sender, RoutedEventArgs e)
     {
         if (_viewModel != null)

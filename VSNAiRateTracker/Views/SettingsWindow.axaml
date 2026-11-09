@@ -55,6 +55,10 @@
                                     Click="OnLoginWithWebClick"
                                     IsEnabled="{Binding !IsLoggingIn}" />
 
+                            <Button Content="Importar de Claude Code"
+                                    Click="OnImportClaudeClick"
+                                    IsEnabled="{Binding !IsLoggingIn}" />
+
                             <Button Content="Cerrar sesión"
                                     Click="OnLogoutWebClick"
                                     IsVisible="{Binding IsLoggedInWithWeb}" />
