@@ -230,8 +230,8 @@ public class BurnDownCalculatorTests
         result.ActualRatio.Should().Be(0.0);
         result.DeltaHours.Should().Be(0.0);
         result.Status.Should().Be(RateStatus.Optimal);
-        result.FormattedDelta.Should().Be("0.0h");
-        result.ShortText.Should().Be("0.0");
+        result.FormattedDelta.Should().Be("+0.0h");
+        result.ShortText.Should().Be("+0.0");
     }
 
     [Fact]

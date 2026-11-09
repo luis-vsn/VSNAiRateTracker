@@ -66,29 +66,32 @@ public class IconRendererService : IIconRendererService
             var displayText = text ?? string.Empty;
             if (string.IsNullOrWhiteSpace(displayText))
             {
-                displayText = "0";
+                displayText = "+0.0";
             }
 
-            // Ultra-bold sans-serif font for maximum legibility in the system tray
-            using var typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyleWeight.Black, SKFontStyleWidth.Condensed, SKFontStyleSlant.Upright)
+            // Prefer Bahnschrift (Windows standard DIN-1451 font for high-legibility dials/gauges), fallback to Segoe UI Black, Arial Black
+            using var typeface = SKTypeface.FromFamilyName("Bahnschrift", SKFontStyleWeight.Bold, SKFontStyleWidth.Condensed, SKFontStyleSlant.Upright)
+                ?? SKTypeface.FromFamilyName("Segoe UI Variable Display", SKFontStyleWeight.Black, SKFontStyleWidth.Condensed, SKFontStyleSlant.Upright)
+                ?? SKTypeface.FromFamilyName("Segoe UI", SKFontStyleWeight.Black, SKFontStyleWidth.Condensed, SKFontStyleSlant.Upright)
                 ?? SKTypeface.FromFamilyName("Arial", SKFontStyleWeight.Bold, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright)
                 ?? SKTypeface.Default;
 
-            // Target filling almost the entire canvas: 96% of width, 92% of height
-            float targetW = size * 0.96f;
+            // Target filling almost the entire canvas: 98% of width, 92% of height
+            float targetW = size * 0.98f;
             float targetH = size * 0.92f;
 
-            // Dynamically scale font size so glyphs fill the maximum possible space
+            // Measure with a test font size using compact tracking (tight kerning for '.' and signs)
             float testFontSize = 32f;
             using var testFont = new SKFont(typeface, testFontSize);
             using var testPaint = new SKPaint { IsAntialias = true };
-            testFont.MeasureText(displayText, out var initialBounds, testPaint);
+
+            var (initWidth, initHeight, _, _) = MeasureTightLayout(displayText, testFont, testPaint);
 
             float calculatedFontSize = testFontSize;
-            if (initialBounds.Width > 0 && initialBounds.Height > 0)
+            if (initWidth > 0 && initHeight > 0)
             {
-                float scaleX = targetW / initialBounds.Width;
-                float scaleY = targetH / initialBounds.Height;
+                float scaleX = targetW / initWidth;
+                float scaleY = targetH / initHeight;
                 calculatedFontSize = testFontSize * Math.Min(scaleX, scaleY);
             }
 
@@ -97,7 +100,7 @@ public class IconRendererService : IIconRendererService
             // Subtle dark contrast outline to guarantee sharpness on both light and dark system trays
             using var outlinePaint = new SKPaint
             {
-                Color = new SKColor(0, 0, 0, 210),
+                Color = new SKColor(0, 0, 0, 220),
                 IsAntialias = true,
                 Style = SKPaintStyle.Stroke,
                 StrokeWidth = Math.Max(1.5f, size * 0.045f)
@@ -110,16 +113,73 @@ public class IconRendererService : IIconRendererService
                 Style = SKPaintStyle.Fill
             };
 
-            font.MeasureText(displayText, out var textBounds, textPaint);
-            // Center the actual bounding box directly in the middle of the icon canvas
-            float x = (size / 2f) - textBounds.MidX;
-            float y = (size / 2f) - textBounds.MidY;
+            var (finalWidth, _, charWidths, charLefts) = MeasureTightLayout(displayText, font, textPaint);
 
-            canvas.DrawText(displayText, x, y, SKTextAlign.Left, font, outlinePaint);
-            canvas.DrawText(displayText, x, y, SKTextAlign.Left, font, textPaint);
+            // Vertical centering based on digits
+            float digitTop = 0f;
+            float digitBottom = 0f;
+            bool foundDigit = false;
+            for (int i = 0; i < displayText.Length; i++)
+            {
+                if (char.IsDigit(displayText[i]))
+                {
+                    font.MeasureText(displayText.Substring(i, 1), out var db, textPaint);
+                    if (!foundDigit || db.Top < digitTop) digitTop = db.Top;
+                    if (!foundDigit || db.Bottom > digitBottom) digitBottom = db.Bottom;
+                    foundDigit = true;
+                }
+            }
+
+            float digitHeight = foundDigit ? (digitBottom - digitTop) : font.Size;
+            float baseY = (size / 2f) - (digitTop + (digitHeight / 2f));
+            float startX = (size - finalWidth) / 2f;
+
+            float curX = startX;
+            for (int i = 0; i < displayText.Length; i++)
+            {
+                var ch = displayText.Substring(i, 1);
+                float drawX = curX - charLefts[i];
+
+                canvas.DrawText(ch, drawX, baseY, SKTextAlign.Left, font, outlinePaint);
+                canvas.DrawText(ch, drawX, baseY, SKTextAlign.Left, font, textPaint);
+
+                float gap = font.Size * (ch == "." ? 0.03f : (ch == "+" || ch == "-" ? 0.04f : 0.035f));
+                curX += charWidths[i] + gap;
+            }
         }
 
         return bitmap;
+    }
+
+    private static (float totalWidth, float maxHeight, float[] charWidths, float[] charLefts) MeasureTightLayout(
+        string text,
+        SKFont font,
+        SKPaint paint)
+    {
+        var charWidths = new float[text.Length];
+        var charLefts = new float[text.Length];
+        float curX = 0f;
+        float maxHeight = 0f;
+
+        for (int i = 0; i < text.Length; i++)
+        {
+            var ch = text.Substring(i, 1);
+            font.MeasureText(ch, out var b, paint);
+
+            float visualW = Math.Max(b.Width, 1f);
+            charWidths[i] = visualW;
+            charLefts[i] = b.Left;
+
+            float gap = font.Size * (ch == "." ? 0.03f : (ch == "+" || ch == "-" ? 0.04f : 0.035f));
+            curX += visualW + (i < text.Length - 1 ? gap : 0f);
+
+            if (b.Height > maxHeight)
+            {
+                maxHeight = b.Height;
+            }
+        }
+
+        return (curX, maxHeight, charWidths, charLefts);
     }
 
     public SKBitmap RenderAlertBitmap(bool isCritical = false, int size = 64)

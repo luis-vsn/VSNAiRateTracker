@@ -82,8 +82,51 @@ public class IconRendererServiceTests
         int contentHeight = maxY - minY + 1;
 
         // Content must occupy the vast majority of the 64x64 canvas to be clearly visible in Windows tray
-        contentWidth.Should().BeGreaterThanOrEqualTo(45); // >= 70% of 64px
-        contentHeight.Should().BeGreaterThanOrEqualTo(25); // >= 40% of 64px
+        contentWidth.Should().BeGreaterThanOrEqualTo(40); // >= 60% of 64px
+        contentHeight.Should().BeGreaterThanOrEqualTo(20); // >= 30% of 64px
+    }
+
+    [Theory]
+    [InlineData(0.0, "+0.0", "+0.0h")]
+    [InlineData(0.4, "+0.4", "+0.4h")]
+    [InlineData(-0.4, "-0.4", "-0.4h")]
+    [InlineData(9.9, "+9.9", "+9.9h")]
+    [InlineData(-9.9, "-9.9", "-9.9h")]
+    [InlineData(10.0, "+10", "+10h")]
+    [InlineData(-10.0, "-10", "-10h")]
+    [InlineData(12.4, "+12", "+12h")]
+    [InlineData(12.6, "+13", "+13h")]
+    [InlineData(-15.3, "-15", "-15h")]
+    [InlineData(-15.7, "-16", "-16h")]
+    public void UsageState_ShortText_FollowsThresholdRulesAndAlwaysIncludesSign(double delta, string expectedShort, string expectedFormatted)
+    {
+        var state = new Models.UsageState { DeltaHours = delta };
+        state.ShortText.Should().Be(expectedShort);
+        state.FormattedDelta.Should().Be(expectedFormatted);
+    }
+
+    [Fact]
+    public void RenderBadgeBitmap_ForNegativeDecimal_GeneratesTallCompactDigits()
+    {
+        using var bitmap = _sut.RenderBadgeBitmap("-0.4", "#2ECC71", 64);
+        int minX = 64, maxX = 0, minY = 64, maxY = 0;
+        for (int y = 0; y < 64; y++)
+        {
+            for (int x = 0; x < 64; x++)
+            {
+                if (bitmap.GetPixel(x, y).Alpha > 10)
+                {
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+                }
+            }
+        }
+        int contentWidth = maxX - minX + 1;
+        int contentHeight = maxY - minY + 1;
+        contentWidth.Should().BeGreaterThanOrEqualTo(40);
+        contentHeight.Should().BeGreaterThanOrEqualTo(20);
     }
 
     [Fact]

@@ -34,11 +34,13 @@ public class UsageState
     {
         get
         {
-            if (DeltaHours > 0)
-                return $"+{DeltaHours:F1}h";
-            if (DeltaHours < 0)
-                return $"{DeltaHours:F1}h";
-            return "0.0h";
+            var abs = Math.Abs(DeltaHours);
+            var sign = DeltaHours >= 0 ? "+" : "-";
+            if (abs >= 10.0)
+            {
+                return $"{sign}{Math.Round(abs):F0}h";
+            }
+            return $"{sign}{abs:F1}h";
         }
     }
 
@@ -46,19 +48,13 @@ public class UsageState
     {
         get
         {
-            if (DeltaHours > 0)
+            var abs = Math.Abs(DeltaHours);
+            var sign = DeltaHours >= 0 ? "+" : "-";
+            if (abs >= 10.0)
             {
-                if (Math.Abs(DeltaHours) >= 10.0)
-                    return $"+{DeltaHours:F0}";
-                return $"+{DeltaHours:F1}";
+                return $"{sign}{Math.Round(abs):F0}";
             }
-            if (DeltaHours < 0)
-            {
-                if (Math.Abs(DeltaHours) >= 10.0)
-                    return $"{DeltaHours:F0}";
-                return $"{DeltaHours:F1}";
-            }
-            return "0.0";
+            return $"{sign}{abs:F1}";
         }
     }
 
