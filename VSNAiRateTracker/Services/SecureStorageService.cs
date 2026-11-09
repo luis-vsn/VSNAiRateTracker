@@ -31,7 +31,7 @@ public class SecureStorageService : ISecureStorageService
 
         _configFilePath = Path.Combine(_storageDirectory, "config.enc");
         _keyFilePath = Path.Combine(_storageDirectory, "master.key");
-        _keyProtectionProvider = keyProtectionProvider ?? new WindowsDpapiProtectionProvider();
+        _keyProtectionProvider = keyProtectionProvider ?? new CrossPlatformKeyProtectionProvider();
 
         Directory.CreateDirectory(_storageDirectory);
         _masterKey = InitializeMasterKey();
@@ -59,6 +59,7 @@ public class SecureStorageService : ISecureStorageService
         var newKey = RandomNumberGenerator.GetBytes(KeySize);
         var newlyProtectedKey = _keyProtectionProvider.ProtectKey(newKey);
         File.WriteAllBytes(_keyFilePath, newlyProtectedKey);
+        ApplyUnixSecurePermissions(_keyFilePath);
         return newKey;
     }
 
@@ -135,6 +136,7 @@ public class SecureStorageService : ISecureStorageService
         var tempPath = _configFilePath + ".tmp";
         await File.WriteAllBytesAsync(tempPath, encryptedBytes, cancellationToken);
         File.Move(tempPath, _configFilePath, overwrite: true);
+        ApplyUnixSecurePermissions(_configFilePath);
     }
 
     public async Task<AppConfig> LoadConfigAsync(CancellationToken cancellationToken = default)
@@ -154,6 +156,21 @@ public class SecureStorageService : ISecureStorageService
         catch
         {
             return new AppConfig();
+        }
+    }
+
+    private static void ApplyUnixSecurePermissions(string path)
+    {
+        if (!System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
+        {
+            try
+            {
+                File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            }
+            catch
+            {
+                // Silently ignore if file system does not support Unix file permissions
+            }
         }
     }
 }
