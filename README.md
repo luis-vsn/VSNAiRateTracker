@@ -114,10 +114,10 @@ La aplicación puede emitir trazas, métricas y logs estructurados vía **OTLP H
   - `Authorization=Basic <token_base64>`
   - Donde `<token_base64>` es la cadena Base64 generada a partir de `<Instance_ID>:<API_Token>` (Grafana Cloud te proporciona este valor directamente en la pantalla de configuración OTLP).
 
-### 3. Identificación del equipo emisor (`host.name`)
+### 3. Identificación del equipo emisor (`instance`)
 
 Cada métrica, log y traza enviada por la aplicación incluye de forma automática:
-* `host.name`: Nombre de la máquina donde se ejecuta la aplicación (`Environment.MachineName`), permitiendo filtrar dashboards de Grafana por puesto o usuario.
+* `instance`: Nombre de la máquina donde se ejecuta la aplicación (`Environment.MachineName`), permitiendo filtrar métricas y dashboards de Grafana/Prometheus directamente por equipo.
 * `service.name`: Nombre del servicio configurado (por defecto `vsn-ai-rate-tracker`).
 * `service.version`: Versión de la aplicación (`0.0.1`).
 
