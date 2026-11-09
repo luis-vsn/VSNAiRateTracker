@@ -14,13 +14,15 @@ public class SettingsViewModelTests
 {
     private readonly Mock<ISecureStorageService> _storageMock;
     private readonly Mock<IAnthropicApiService> _apiMock;
+    private readonly Mock<IAnthropicAuthService> _authMock;
     private readonly SettingsViewModel _sut;
 
     public SettingsViewModelTests()
     {
         _storageMock = new Mock<ISecureStorageService>();
         _apiMock = new Mock<IAnthropicApiService>();
-        _sut = new SettingsViewModel(_storageMock.Object, _apiMock.Object);
+        _authMock = new Mock<IAnthropicAuthService>();
+        _sut = new SettingsViewModel(_storageMock.Object, _apiMock.Object, _authMock.Object);
     }
 
     [Fact]
@@ -86,10 +88,50 @@ public class SettingsViewModelTests
     }
 
     [Fact]
-    public async Task TestConnectionAsync_WhenApiKeyIsEmpty_ReturnsFalseAndWarning()
+    public async Task LoginWithWebAsync_WhenSuccessful_UpdatesTokensAndStorage()
+    {
+        // Arrange
+        var tokens = new OAuthTokens
+        {
+            AccessToken = "at-live-123",
+            RefreshToken = "rt-live-456",
+            ExpiresAt = DateTimeOffset.UtcNow.AddDays(7)
+        };
+        _authMock.Setup(a => a.StartInteractiveLoginAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(tokens);
+
+        // Act
+        var result = await _sut.LoginWithWebAsync();
+
+        // Assert
+        result.Should().BeTrue();
+        _sut.IsLoggedInWithWeb.Should().BeTrue();
+        _sut.AuthTokens.Should().Be(tokens);
+        _sut.SessionStatusText.Should().Contain("Web Signing");
+        _storageMock.Verify(s => s.SaveConfigAsync(It.Is<AppConfig>(c => c.AuthTokens == tokens), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task LogoutWebAsync_ClearsTokensAndSaves()
+    {
+        // Arrange
+        _sut.AuthTokens = new OAuthTokens { AccessToken = "at-active" };
+
+        // Act
+        await _sut.LogoutWebAsync();
+
+        // Assert
+        _sut.IsLoggedInWithWeb.Should().BeFalse();
+        _sut.AuthTokens.Should().BeNull();
+        _storageMock.Verify(s => s.SaveConfigAsync(It.Is<AppConfig>(c => c.AuthTokens == null), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task TestConnectionAsync_WhenNoCredentials_ReturnsFalseAndWarning()
     {
         // Arrange
         _sut.ApiKey = "";
+        _sut.AuthTokens = null;
 
         // Act
         var result = await _sut.TestConnectionAsync();
@@ -97,16 +139,15 @@ public class SettingsViewModelTests
         // Assert
         result.Should().BeFalse();
         _sut.IsStatusSuccess.Should().BeFalse();
-        _sut.StatusMessage.Should().Contain("Introduce una clave");
-        _apiMock.Verify(a => a.ValidateApiKeyAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _sut.StatusMessage.Should().Contain("Inicia sesión");
     }
 
     [Fact]
-    public async Task TestConnectionAsync_WhenApiKeyIsValid_SetsSuccessStatus()
+    public async Task TestConnectionAsync_WhenCredentialsValid_SetsSuccessStatus()
     {
         // Arrange
         _sut.ApiKey = "sk-ant-valid";
-        _apiMock.Setup(a => a.ValidateApiKeyAsync("sk-ant-valid", It.IsAny<CancellationToken>()))
+        _apiMock.Setup(a => a.ValidateCredentialsAsync("sk-ant-valid", null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
 
         // Act
@@ -116,23 +157,6 @@ public class SettingsViewModelTests
         result.Should().BeTrue();
         _sut.IsStatusSuccess.Should().BeTrue();
         _sut.StatusMessage.Should().Contain("correctamente");
-    }
-
-    [Fact]
-    public async Task TestConnectionAsync_WhenApiKeyIsInvalid_SetsErrorStatus()
-    {
-        // Arrange
-        _sut.ApiKey = "sk-ant-invalid";
-        _apiMock.Setup(a => a.ValidateApiKeyAsync("sk-ant-invalid", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(false);
-
-        // Act
-        var result = await _sut.TestConnectionAsync();
-
-        // Assert
-        result.Should().BeFalse();
-        _sut.IsStatusSuccess.Should().BeFalse();
-        _sut.StatusMessage.Should().Contain("inválida");
     }
 
     [Fact]
@@ -150,4 +174,3 @@ public class SettingsViewModelTests
         _storageMock.Verify(s => s.SaveConfigAsync(It.Is<AppConfig>(c => c.ApiKey == "sk-ant-key"), It.IsAny<CancellationToken>()), Times.Once);
     }
 }
-

@@ -39,3 +39,4 @@ public class KeyProtectionProviderTests
         recoveredKey.Should().Equal(rawKey);
     }
 }
+

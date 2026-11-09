@@ -23,6 +23,27 @@ public partial class SettingsWindow : Window
         DataContext = _viewModel;
     }
 
+    private async void OnLoginWithWebClick(object? sender, RoutedEventArgs e)
+    {
+        if (_viewModel != null)
+        {
+            var success = await _viewModel.LoginWithWebAsync();
+            if (success)
+            {
+                _onSavedCallback?.Invoke();
+            }
+        }
+    }
+
+    private async void OnLogoutWebClick(object? sender, RoutedEventArgs e)
+    {
+        if (_viewModel != null)
+        {
+            await _viewModel.LogoutWebAsync();
+            _onSavedCallback?.Invoke();
+        }
+    }
+
     private async void OnTestConnectionClick(object? sender, RoutedEventArgs e)
     {
         if (_viewModel != null)

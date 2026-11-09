@@ -17,6 +17,7 @@ public partial class App : Application
     private ISyncOrchestrator? _orchestrator;
     private ISecureStorageService? _storageService;
     private IAnthropicApiService? _apiService;
+    private IAnthropicAuthService? _authService;
     private SettingsWindow? _settingsWindow;
     private HttpClient? _httpClient;
 
@@ -35,6 +36,7 @@ public partial class App : Application
             _httpClient = new HttpClient();
             _storageService = new SecureStorageService();
             _apiService = new AnthropicApiService(_httpClient);
+            _authService = new AnthropicAuthService(_httpClient);
             var calculator = new BurnDownCalculator();
             var iconRenderer = new IconRendererService();
             var trayManager = new TrayIconManager(iconRenderer);
@@ -44,6 +46,7 @@ public partial class App : Application
                 _apiService,
                 calculator,
                 trayManager,
+                _authService,
                 openSettingsAction: () => Dispatcher.UIThread.Post(OpenSettingsWindow),
                 shutdownAction: () => Dispatcher.UIThread.Post(() => desktop.Shutdown()));
 
@@ -52,7 +55,7 @@ public partial class App : Application
             // Start background synchronization loop
             _ = _orchestrator.StartAsync();
 
-            // On first startup without API Key, open settings automatically
+            // On first startup without credentials, open settings automatically
             _ = CheckInitialConfigurationAsync();
         }
 
@@ -64,7 +67,7 @@ public partial class App : Application
         if (_storageService == null) return;
 
         var config = await _storageService.LoadConfigAsync();
-        if (string.IsNullOrWhiteSpace(config.ApiKey))
+        if (!config.HasCredentials)
         {
             await Dispatcher.UIThread.InvokeAsync(OpenSettingsWindow);
         }
@@ -78,10 +81,10 @@ public partial class App : Application
             return;
         }
 
-        if (_storageService == null || _apiService == null || _orchestrator == null)
+        if (_storageService == null || _apiService == null || _authService == null || _orchestrator == null)
             return;
 
-        var viewModel = new SettingsViewModel(_storageService, _apiService);
+        var viewModel = new SettingsViewModel(_storageService, _apiService, _authService);
         _ = _storageService.LoadConfigAsync().ContinueWith(task =>
         {
             if (task.IsCompletedSuccessfully)

@@ -12,6 +12,7 @@ public class AnthropicUsageResult
     public long? TokensLimit { get; set; }
     public long? TokensRemaining { get; set; }
     public int StatusCode { get; set; }
+    public bool IsSessionExpired => StatusCode == 401;
 
     public static AnthropicUsageResult Success(
         double percentConsumed,

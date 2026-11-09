@@ -76,7 +76,12 @@ public class WorkSchedule
 public class AppConfig
 {
     public string ApiKey { get; set; } = string.Empty;
+    public OAuthTokens? AuthTokens { get; set; }
     public int SyncIntervalMinutes { get; set; } = 5;
     public WorkSchedule Schedule { get; set; } = WorkSchedule.CreateDefault();
+
+    public bool HasCredentials =>
+        (AuthTokens != null && !string.IsNullOrWhiteSpace(AuthTokens.AccessToken)) ||
+        !string.IsNullOrWhiteSpace(ApiKey);
 }
 

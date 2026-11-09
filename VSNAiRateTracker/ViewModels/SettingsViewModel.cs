@@ -12,8 +12,10 @@ public class SettingsViewModel : INotifyPropertyChanged
 {
     private readonly ISecureStorageService _storageService;
     private readonly IAnthropicApiService _apiService;
+    private readonly IAnthropicAuthService _authService;
 
     private string _apiKey = string.Empty;
+    private OAuthTokens? _authTokens;
     private int _syncIntervalMinutes = 5;
     private bool _isMonday = true;
     private bool _isTuesday = true;
@@ -29,22 +31,56 @@ public class SettingsViewModel : INotifyPropertyChanged
     private string _statusMessage = string.Empty;
     private bool _isStatusSuccess;
     private bool _isTestingConnection;
-    private bool _showApiKey;
+    private bool _isLoggingIn;
+    private string _sessionStatusText = "Sesión no iniciada.";
+    private bool _isLoggedInWithWeb;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public SettingsViewModel(
         ISecureStorageService storageService,
-        IAnthropicApiService apiService)
+        IAnthropicApiService apiService,
+        IAnthropicAuthService authService)
     {
         _storageService = storageService ?? throw new ArgumentNullException(nameof(storageService));
         _apiService = apiService ?? throw new ArgumentNullException(nameof(apiService));
+        _authService = authService ?? throw new ArgumentNullException(nameof(authService));
     }
 
     public string ApiKey
     {
         get => _apiKey;
         set => SetField(ref _apiKey, value);
+    }
+
+    public OAuthTokens? AuthTokens
+    {
+        get => _authTokens;
+        set
+        {
+            if (SetField(ref _authTokens, value))
+            {
+                UpdateSessionStatus();
+            }
+        }
+    }
+
+    public bool IsLoggedInWithWeb
+    {
+        get => _isLoggedInWithWeb;
+        private set => SetField(ref _isLoggedInWithWeb, value);
+    }
+
+    public string SessionStatusText
+    {
+        get => _sessionStatusText;
+        private set => SetField(ref _sessionStatusText, value);
+    }
+
+    public bool IsLoggingIn
+    {
+        get => _isLoggingIn;
+        set => SetField(ref _isLoggingIn, value);
     }
 
     public int SyncIntervalMinutes
@@ -131,17 +167,12 @@ public class SettingsViewModel : INotifyPropertyChanged
         set => SetField(ref _isTestingConnection, value);
     }
 
-    public bool ShowApiKey
-    {
-        get => _showApiKey;
-        set => SetField(ref _showApiKey, value);
-    }
-
     public void LoadFromConfig(AppConfig config)
     {
         ArgumentNullException.ThrowIfNull(config);
 
         ApiKey = config.ApiKey ?? string.Empty;
+        AuthTokens = config.AuthTokens;
         SyncIntervalMinutes = config.SyncIntervalMinutes > 0 ? config.SyncIntervalMinutes : 5;
         TimeZoneId = config.Schedule?.TimeZoneId ?? "Local";
 
@@ -169,6 +200,8 @@ public class SettingsViewModel : INotifyPropertyChanged
 
         if (detectedStart.HasValue) StartTime = detectedStart.Value;
         if (detectedEnd.HasValue) EndTime = detectedEnd.Value;
+
+        UpdateSessionStatus();
     }
 
     public AppConfig ToConfig()
@@ -176,6 +209,7 @@ public class SettingsViewModel : INotifyPropertyChanged
         var config = new AppConfig
         {
             ApiKey = ApiKey.Trim(),
+            AuthTokens = AuthTokens,
             SyncIntervalMinutes = SyncIntervalMinutes,
             Schedule = new WorkSchedule
             {
@@ -197,21 +231,65 @@ public class SettingsViewModel : INotifyPropertyChanged
         return config;
     }
 
+    public async Task<bool> LoginWithWebAsync()
+    {
+        IsLoggingIn = true;
+        StatusMessage = "Abriendo el navegador para autenticarte con Anthropic...";
+        IsStatusSuccess = true;
+
+        try
+        {
+            var tokens = await _authService.StartInteractiveLoginAsync();
+            AuthTokens = tokens;
+
+            var config = ToConfig();
+            config.AuthTokens = tokens;
+            await _storageService.SaveConfigAsync(config);
+
+            StatusMessage = "✓ Autenticación Web completada con éxito.";
+            IsStatusSuccess = true;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"✗ Error durante la autenticación web: {ex.Message}";
+            IsStatusSuccess = false;
+            return false;
+        }
+        finally
+        {
+            IsLoggingIn = false;
+        }
+    }
+
+    public async Task LogoutWebAsync()
+    {
+        AuthTokens = null;
+        var config = ToConfig();
+        config.AuthTokens = null;
+        await _storageService.SaveConfigAsync(config);
+        StatusMessage = "Sesión cerrada.";
+        IsStatusSuccess = true;
+    }
+
     public async Task<bool> TestConnectionAsync()
     {
-        if (string.IsNullOrWhiteSpace(ApiKey))
+        bool hasToken = AuthTokens != null && !string.IsNullOrWhiteSpace(AuthTokens.AccessToken);
+        bool hasKey = !string.IsNullOrWhiteSpace(ApiKey);
+
+        if (!hasToken && !hasKey)
         {
-            StatusMessage = "Introduce una clave de API antes de probar la conexión.";
+            StatusMessage = "Inicia sesión con Anthropic (Web) o introduce una API Key.";
             IsStatusSuccess = false;
             return false;
         }
 
         IsTestingConnection = true;
-        StatusMessage = "Validando clave con Anthropic...";
+        StatusMessage = "Validando credenciales con Anthropic...";
 
         try
         {
-            var isValid = await _apiService.ValidateApiKeyAsync(ApiKey.Trim());
+            var isValid = await _apiService.ValidateCredentialsAsync(ApiKey.Trim(), AuthTokens);
             if (isValid)
             {
                 StatusMessage = "✓ Conexión establecida correctamente con Anthropic.";
@@ -220,7 +298,7 @@ public class SettingsViewModel : INotifyPropertyChanged
             }
             else
             {
-                StatusMessage = "✗ Error de conexión: la clave es inválida o no tiene permisos.";
+                StatusMessage = "✗ Error de conexión: credenciales inválidas o expiradas.";
                 IsStatusSuccess = false;
                 return false;
             }
@@ -255,11 +333,33 @@ public class SettingsViewModel : INotifyPropertyChanged
         }
     }
 
-    private void SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
+    private void UpdateSessionStatus()
     {
-        if (EqualityComparer<T>.Default.Equals(field, value)) return;
+        if (_authTokens != null && !string.IsNullOrWhiteSpace(_authTokens.AccessToken))
+        {
+            if (_authTokens.IsExpired())
+            {
+                IsLoggedInWithWeb = false;
+                SessionStatusText = "⚠️ Sesión expirada. Vuelve a iniciar sesión.";
+            }
+            else
+            {
+                IsLoggedInWithWeb = true;
+                SessionStatusText = $"✓ Conectado mediante Web Signing (Válido hasta {_authTokens.ExpiresAt.ToLocalTime():g})";
+            }
+        }
+        else
+        {
+            IsLoggedInWithWeb = false;
+            SessionStatusText = "Sesión no iniciada.";
+        }
+    }
+
+    private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
+    {
+        if (EqualityComparer<T>.Default.Equals(field, value)) return false;
         field = value;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        return true;
     }
 }
-

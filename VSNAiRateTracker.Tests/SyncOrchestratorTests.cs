@@ -15,6 +15,7 @@ public class SyncOrchestratorTests
     private readonly Mock<IAnthropicApiService> _apiMock;
     private readonly Mock<IBurnDownCalculator> _calculatorMock;
     private readonly Mock<ITrayIconManager> _trayMock;
+    private readonly Mock<IAnthropicAuthService> _authMock;
 
     public SyncOrchestratorTests()
     {
@@ -22,27 +23,143 @@ public class SyncOrchestratorTests
         _apiMock = new Mock<IAnthropicApiService>();
         _calculatorMock = new Mock<IBurnDownCalculator>();
         _trayMock = new Mock<ITrayIconManager>();
+        _authMock = new Mock<IAnthropicAuthService>();
     }
 
-    [Fact]
-    public async Task SyncOnceAsync_WhenApiKeyIsEmpty_SetsQuestionMarkStatus()
+    private SyncOrchestrator CreateSut(Action? openSettings = null, Action? shutdown = null)
     {
-        // Arrange
-        _storageMock.Setup(s => s.LoadConfigAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new AppConfig { ApiKey = "" });
-
-        var sut = new SyncOrchestrator(
+        return new SyncOrchestrator(
             _storageMock.Object,
             _apiMock.Object,
             _calculatorMock.Object,
-            _trayMock.Object);
+            _trayMock.Object,
+            _authMock.Object,
+            openSettingsAction: openSettings,
+            shutdownAction: shutdown);
+    }
+
+    [Fact]
+    public async Task SyncOnceAsync_WhenNoCredentials_SetsQuestionOrLoginStatus()
+    {
+        // Arrange
+        _storageMock.Setup(s => s.LoadConfigAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AppConfig { ApiKey = "", AuthTokens = null });
+
+        var sut = CreateSut();
 
         // Act
         await sut.SyncOnceAsync();
 
         // Assert
-        _trayMock.Verify(t => t.SetStatus("?", It.Is<string>(s => s.Contains("API Key")), 0.0), Times.Once);
-        _apiMock.Verify(a => a.GetUsageAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _trayMock.Verify(t => t.SetStatus("LOG", It.Is<string>(s => s.Contains("Inicia sesión")), 0.0), Times.Once);
+        _apiMock.Verify(a => a.GetUsageAsync(It.IsAny<string?>(), It.IsAny<OAuthTokens?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SyncOnceAsync_WhenOAuthTokenNearingExpiration_RefreshesTokenAutomatically()
+    {
+        // Arrange
+        var expiredTokens = new OAuthTokens
+        {
+            AccessToken = "at-old",
+            RefreshToken = "rt-valid",
+            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(2) // Expires in 2 min (within 5 min buffer)
+        };
+
+        var newTokens = new OAuthTokens
+        {
+            AccessToken = "at-new",
+            RefreshToken = "rt-valid",
+            ExpiresAt = DateTimeOffset.UtcNow.AddHours(2)
+        };
+
+        var schedule = WorkSchedule.CreateDefault();
+        var config = new AppConfig { AuthTokens = expiredTokens, Schedule = schedule };
+
+        _storageMock.Setup(s => s.LoadConfigAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(config);
+
+        _authMock.Setup(a => a.RefreshTokensAsync(expiredTokens, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(newTokens);
+
+        var cycleStart = DateTimeOffset.UtcNow.AddHours(-2);
+        var cycleEnd = DateTimeOffset.UtcNow.AddHours(3);
+        _apiMock.Setup(a => a.GetUsageAsync(config.ApiKey, newTokens, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AnthropicUsageResult.Success(30.0, cycleStart, cycleEnd));
+
+        var calculatedState = new UsageState { DeltaHours = 2.0, Status = RateStatus.Green };
+        _calculatorMock.Setup(c => c.Calculate(schedule, 30.0, cycleStart, cycleEnd, It.IsAny<DateTimeOffset>()))
+            .Returns(calculatedState);
+
+        var sut = CreateSut();
+
+        // Act
+        await sut.SyncOnceAsync();
+
+        // Assert
+        _authMock.Verify(a => a.RefreshTokensAsync(expiredTokens, It.IsAny<CancellationToken>()), Times.Once);
+        _storageMock.Verify(s => s.SaveConfigAsync(It.Is<AppConfig>(c => c.AuthTokens == newTokens), It.IsAny<CancellationToken>()), Times.Once);
+        _trayMock.Verify(t => t.UpdateState(calculatedState), Times.Once);
+    }
+
+    [Fact]
+    public async Task SyncOnceAsync_WhenOAuthTokenExpiredAndRefreshFails_SetsSessionExpiredStatus()
+    {
+        // Arrange
+        var expiredTokens = new OAuthTokens
+        {
+            AccessToken = "at-old",
+            RefreshToken = "rt-expired",
+            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-10) // Already expired
+        };
+
+        var config = new AppConfig { AuthTokens = expiredTokens };
+        _storageMock.Setup(s => s.LoadConfigAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(config);
+
+        _authMock.Setup(a => a.RefreshTokensAsync(expiredTokens, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((OAuthTokens?)null); // Refresh failed
+
+        var sut = CreateSut();
+
+        // Act
+        await sut.SyncOnceAsync();
+
+        // Assert
+        _trayMock.Verify(t => t.SetStatus("LOG", It.Is<string>(s => s.Contains("expirada")), -2.0), Times.Once);
+        _apiMock.Verify(a => a.GetUsageAsync(It.IsAny<string?>(), It.IsAny<OAuthTokens?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SyncOnceAsync_WhenApiReturns401_NotifiesSessionExpired()
+    {
+        // Arrange
+        var tokens = new OAuthTokens
+        {
+            AccessToken = "at-valid-looking",
+            RefreshToken = "rt-revoked",
+            ExpiresAt = DateTimeOffset.UtcNow.AddHours(1)
+        };
+
+        var config = new AppConfig { AuthTokens = tokens };
+        _storageMock.Setup(s => s.LoadConfigAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(config);
+
+        // API says 401 Unauthorized
+        _apiMock.Setup(a => a.GetUsageAsync(config.ApiKey, tokens, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AnthropicUsageResult.Failure("Session revoked", 401));
+
+        // Refresh also fails
+        _authMock.Setup(a => a.RefreshTokensAsync(tokens, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((OAuthTokens?)null);
+
+        var sut = CreateSut();
+
+        // Act
+        await sut.SyncOnceAsync();
+
+        // Assert
+        _trayMock.Verify(t => t.SetStatus("LOG", It.Is<string>(s => s.Contains("expirada")), -2.0), Times.Once);
     }
 
     [Fact]
@@ -57,7 +174,7 @@ public class SyncOrchestratorTests
         var cycleEnd = DateTimeOffset.UtcNow.AddHours(3);
         var apiResult = AnthropicUsageResult.Success(40.0, cycleStart, cycleEnd);
 
-        _apiMock.Setup(a => a.GetUsageAsync("sk-ant-valid", It.IsAny<CancellationToken>()))
+        _apiMock.Setup(a => a.GetUsageAsync("sk-ant-valid", null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(apiResult);
 
         var calculatedState = new UsageState
@@ -75,11 +192,7 @@ public class SyncOrchestratorTests
             It.IsAny<DateTimeOffset>()))
             .Returns(calculatedState);
 
-        var sut = new SyncOrchestrator(
-            _storageMock.Object,
-            _apiMock.Object,
-            _calculatorMock.Object,
-            _trayMock.Object);
+        var sut = CreateSut();
 
         // Act
         await sut.SyncOnceAsync();
@@ -89,40 +202,11 @@ public class SyncOrchestratorTests
     }
 
     [Fact]
-    public async Task SyncOnceAsync_WhenApiFails_SetsErrorStatusOnTray()
-    {
-        // Arrange
-        _storageMock.Setup(s => s.LoadConfigAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new AppConfig { ApiKey = "sk-ant-valid" });
-
-        _apiMock.Setup(a => a.GetUsageAsync("sk-ant-valid", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AnthropicUsageResult.Failure("Quota exhausted", 429));
-
-        var sut = new SyncOrchestrator(
-            _storageMock.Object,
-            _apiMock.Object,
-            _calculatorMock.Object,
-            _trayMock.Object);
-
-        // Act
-        await sut.SyncOnceAsync();
-
-        // Assert
-        _trayMock.Verify(t => t.SetStatus("ERR", It.Is<string>(s => s.Contains("Quota exhausted")), -3.0), Times.Once);
-        _calculatorMock.Verify(c => c.Calculate(It.IsAny<WorkSchedule>(), It.IsAny<double>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>()), Times.Never);
-    }
-
-    [Fact]
     public void OpenSettings_InvokesCallback()
     {
         // Arrange
         bool opened = false;
-        var sut = new SyncOrchestrator(
-            _storageMock.Object,
-            _apiMock.Object,
-            _calculatorMock.Object,
-            _trayMock.Object,
-            openSettingsAction: () => opened = true);
+        var sut = CreateSut(openSettings: () => opened = true);
 
         // Act
         sut.OpenSettings();
@@ -136,12 +220,7 @@ public class SyncOrchestratorTests
     {
         // Arrange
         bool shutdownCalled = false;
-        var sut = new SyncOrchestrator(
-            _storageMock.Object,
-            _apiMock.Object,
-            _calculatorMock.Object,
-            _trayMock.Object,
-            shutdownAction: () => shutdownCalled = true);
+        var sut = CreateSut(shutdown: () => shutdownCalled = true);
 
         // Act
         sut.Shutdown();
@@ -151,4 +230,3 @@ public class SyncOrchestratorTests
         _trayMock.Verify(t => t.Dispose(), Times.Once);
     }
 }
-

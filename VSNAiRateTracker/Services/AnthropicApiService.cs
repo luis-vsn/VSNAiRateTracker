@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -33,18 +34,24 @@ public class AnthropicApiService : IAnthropicApiService
         _initialBackoff = initialBackoff ?? TimeSpan.FromMilliseconds(200);
     }
 
-    public async Task<AnthropicUsageResult> GetUsageAsync(string apiKey, CancellationToken cancellationToken = default)
+    public async Task<AnthropicUsageResult> GetUsageAsync(
+        string? apiKey,
+        OAuthTokens? tokens = null,
+        CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(apiKey))
+        bool hasToken = tokens != null && !string.IsNullOrWhiteSpace(tokens.AccessToken);
+        bool hasApiKey = !string.IsNullOrWhiteSpace(apiKey);
+
+        if (!hasToken && !hasApiKey)
         {
-            return AnthropicUsageResult.Failure("API Key is missing or empty.");
+            return AnthropicUsageResult.Failure("API Key or OAuth Access Token is missing or empty.");
         }
 
         for (int attempt = 0; attempt <= _maxRetries; attempt++)
         {
             try
             {
-                using var request = CreateRequest(apiKey);
+                using var request = CreateRequest(apiKey, tokens);
                 using var response = await _httpClient.SendAsync(request, cancellationToken);
 
                 if (response.IsSuccessStatusCode)
@@ -54,10 +61,10 @@ public class AnthropicApiService : IAnthropicApiService
 
                 int statusCode = (int)response.StatusCode;
 
-                // 401 Unauthorized or 403 Forbidden should never retry
+                // 401 Unauthorized or 403 Forbidden indicates authentication/session expiration
                 if (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.Forbidden)
                 {
-                    return AnthropicUsageResult.Failure("Authentication failed: invalid or expired Anthropic API Key.", statusCode);
+                    return AnthropicUsageResult.Failure("Authentication failed: session expired or invalid credentials.", statusCode);
                 }
 
                 // 429 Too Many Requests or 5xx server errors are retriable
@@ -98,21 +105,31 @@ public class AnthropicApiService : IAnthropicApiService
         return AnthropicUsageResult.Failure("Exceeded maximum retries contacting Anthropic API.");
     }
 
-    public async Task<bool> ValidateApiKeyAsync(string apiKey, CancellationToken cancellationToken = default)
+    public async Task<bool> ValidateCredentialsAsync(
+        string? apiKey,
+        OAuthTokens? tokens = null,
+        CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(apiKey))
-        {
-            return false;
-        }
-
-        var result = await GetUsageAsync(apiKey, cancellationToken);
+        var result = await GetUsageAsync(apiKey, tokens, cancellationToken);
         return result.IsSuccess || result.StatusCode == 200;
     }
 
-    private HttpRequestMessage CreateRequest(string apiKey)
+    public Task<bool> ValidateApiKeyAsync(string apiKey, CancellationToken cancellationToken = default) =>
+        ValidateCredentialsAsync(apiKey, null, cancellationToken);
+
+    private HttpRequestMessage CreateRequest(string? apiKey, OAuthTokens? tokens)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, _endpoint);
-        request.Headers.Add("x-api-key", apiKey);
+
+        if (tokens != null && !string.IsNullOrWhiteSpace(tokens.AccessToken))
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
+        }
+        else if (!string.IsNullOrWhiteSpace(apiKey))
+        {
+            request.Headers.Add("x-api-key", apiKey);
+        }
+
         request.Headers.Add("anthropic-version", AnthropicVersion);
 
         // Minimal lightweight ping payload for token headers

@@ -11,6 +11,7 @@ public class SyncOrchestrator : ISyncOrchestrator
     private readonly IAnthropicApiService _apiService;
     private readonly IBurnDownCalculator _calculator;
     private readonly ITrayIconManager _trayManager;
+    private readonly IAnthropicAuthService _authService;
     private readonly Action? _openSettingsAction;
     private readonly Action? _shutdownAction;
 
@@ -23,6 +24,7 @@ public class SyncOrchestrator : ISyncOrchestrator
         IAnthropicApiService apiService,
         IBurnDownCalculator calculator,
         ITrayIconManager trayManager,
+        IAnthropicAuthService authService,
         Action? openSettingsAction = null,
         Action? shutdownAction = null)
     {
@@ -30,6 +32,7 @@ public class SyncOrchestrator : ISyncOrchestrator
         _apiService = apiService ?? throw new ArgumentNullException(nameof(apiService));
         _calculator = calculator ?? throw new ArgumentNullException(nameof(calculator));
         _trayManager = trayManager ?? throw new ArgumentNullException(nameof(trayManager));
+        _authService = authService ?? throw new ArgumentNullException(nameof(authService));
         _openSettingsAction = openSettingsAction;
         _shutdownAction = shutdownAction;
     }
@@ -75,17 +78,56 @@ public class SyncOrchestrator : ISyncOrchestrator
         try
         {
             var config = await _storageService.LoadConfigAsync(cancellationToken);
-            if (string.IsNullOrWhiteSpace(config.ApiKey))
+            if (!config.HasCredentials)
             {
-                _trayManager.SetStatus("?", "VSNAiRateTracker - Haz clic aquí para configurar tu API Key", 0.0);
+                _trayManager.SetStatus("LOG", "VSNAiRateTracker - Inicia sesión con Anthropic o configura una API Key", 0.0);
                 return;
             }
 
-            var result = await _apiService.GetUsageAsync(config.ApiKey, cancellationToken);
+            // Proactively refresh OAuth token if it's nearing expiration
+            if (config.AuthTokens != null && config.AuthTokens.IsExpired(TimeSpan.FromMinutes(5)))
+            {
+                var refreshedTokens = await _authService.RefreshTokensAsync(config.AuthTokens, cancellationToken);
+                if (refreshedTokens != null)
+                {
+                    config.AuthTokens = refreshedTokens;
+                    await _storageService.SaveConfigAsync(config, cancellationToken);
+                }
+                else
+                {
+                    _trayManager.SetStatus("LOG", "VSNAiRateTracker - Sesión de Anthropic expirada. Haz clic para volver a iniciar sesión.", -2.0);
+                    return;
+                }
+            }
+
+            var result = await _apiService.GetUsageAsync(config.ApiKey, config.AuthTokens, cancellationToken);
             if (!result.IsSuccess)
             {
-                _trayManager.SetStatus("ERR", $"Error consultando Anthropic: {result.ErrorMessage}", -3.0);
-                return;
+                if (result.IsSessionExpired)
+                {
+                    // Attempt token refresh on 401
+                    if (config.AuthTokens != null)
+                    {
+                        var refreshedTokens = await _authService.RefreshTokensAsync(config.AuthTokens, cancellationToken);
+                        if (refreshedTokens != null)
+                        {
+                            config.AuthTokens = refreshedTokens;
+                            await _storageService.SaveConfigAsync(config, cancellationToken);
+                            result = await _apiService.GetUsageAsync(config.ApiKey, config.AuthTokens, cancellationToken);
+                        }
+                    }
+
+                    if (!result.IsSuccess)
+                    {
+                        _trayManager.SetStatus("LOG", "VSNAiRateTracker - Sesión de Anthropic expirada. Haz clic para iniciar sesión de nuevo.", -2.0);
+                        return;
+                    }
+                }
+                else
+                {
+                    _trayManager.SetStatus("ERR", $"Error consultando Anthropic: {result.ErrorMessage}", -3.0);
+                    return;
+                }
             }
 
             var usageState = _calculator.Calculate(
@@ -133,4 +175,3 @@ public class SyncOrchestrator : ISyncOrchestrator
         _trayManager.Dispose();
     }
 }
-
