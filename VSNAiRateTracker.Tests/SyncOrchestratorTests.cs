@@ -151,3 +151,4 @@ public class SyncOrchestratorTests
         _trayMock.Verify(t => t.Dispose(), Times.Once);
     }
 }
+

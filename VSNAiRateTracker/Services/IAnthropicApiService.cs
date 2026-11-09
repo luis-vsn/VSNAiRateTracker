@@ -9,3 +9,4 @@ public interface IAnthropicApiService
     Task<AnthropicUsageResult> GetUsageAsync(string apiKey, CancellationToken cancellationToken = default);
     Task<bool> ValidateApiKeyAsync(string apiKey, CancellationToken cancellationToken = default);
 }
+

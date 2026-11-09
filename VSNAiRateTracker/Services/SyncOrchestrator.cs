@@ -133,3 +133,4 @@ public class SyncOrchestrator : ISyncOrchestrator
         _trayManager.Dispose();
     }
 }
+

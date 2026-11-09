@@ -11,3 +11,4 @@ public interface ISyncOrchestrator : IDisposable
     void OpenSettings();
     void Shutdown();
 }
+

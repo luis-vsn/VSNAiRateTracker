@@ -10,3 +10,4 @@ public interface ITrayIconManager : IDisposable
     void UpdateState(UsageState state);
     void SetStatus(string shortText, string tooltip, double deltaHours);
 }
+

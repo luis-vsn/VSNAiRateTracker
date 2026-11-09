@@ -150,3 +150,4 @@ public class SettingsViewModelTests
         _storageMock.Verify(s => s.SaveConfigAsync(It.Is<AppConfig>(c => c.ApiKey == "sk-ant-key"), It.IsAny<CancellationToken>()), Times.Once);
     }
 }
+
