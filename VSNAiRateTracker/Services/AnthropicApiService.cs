@@ -136,6 +136,7 @@ public class AnthropicApiService : IAnthropicApiService
             oauthRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
             oauthRequest.Headers.Add("anthropic-version", AnthropicVersion);
             oauthRequest.Headers.Add("anthropic-beta", AnthropicBetaOAuth);
+            oauthRequest.Headers.UserAgent.ParseAdd("Claude-Code/2.1.319");
             oauthRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             return oauthRequest;
         }

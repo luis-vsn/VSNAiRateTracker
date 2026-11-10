@@ -23,6 +23,18 @@ public partial class SettingsWindow : Window
         DataContext = _viewModel;
     }
 
+    private async void OnOpenTerminalLoginClick(object? sender, RoutedEventArgs e)
+    {
+        if (_viewModel != null)
+        {
+            await _viewModel.LaunchTerminalLoginAndPollAsync();
+            if (_viewModel.IsLoggedInWithWeb)
+            {
+                _onSavedCallback?.Invoke();
+            }
+        }
+    }
+
     private async void OnLoginWithWebClick(object? sender, RoutedEventArgs e)
     {
         if (_viewModel != null)
@@ -80,5 +92,11 @@ public partial class SettingsWindow : Window
     private void OnCancelClick(object? sender, RoutedEventArgs e)
     {
         Close();
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        _viewModel?.StopPolling();
+        base.OnClosed(e);
     }
 }

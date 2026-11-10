@@ -415,6 +415,12 @@ public class AnthropicApiServiceTests
     [Fact]
     public async Task LiveIntegration_WithStoredAppCredentials_RetrievesRealConsumptionSuccessfully()
     {
+        // Skip during standard unit test runs; run only when LIVE_TESTS=true
+        if (Environment.GetEnvironmentVariable("LIVE_TESTS") != "true")
+        {
+            return;
+        }
+
         // Arrange
         var storage = new SecureStorageService();
         var config = await storage.LoadConfigAsync();
@@ -423,7 +429,28 @@ public class AnthropicApiServiceTests
             return; // Skip if no local credentials on test runner
         }
 
-        using var client = new HttpClient();
+        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+
+        if (config.AuthTokens.IsExpired())
+        {
+            var auth = new AnthropicAuthService(client);
+            var refreshed = await auth.TryImportFromClaudeCliAsync();
+            if (refreshed != null && !refreshed.IsExpired())
+            {
+                config.AuthTokens = refreshed;
+                await storage.SaveConfigAsync(config);
+            }
+            else
+            {
+                refreshed = await auth.RefreshTokensAsync(config.AuthTokens);
+                if (refreshed != null && !refreshed.IsExpired())
+                {
+                    config.AuthTokens = refreshed;
+                    await storage.SaveConfigAsync(config);
+                }
+            }
+        }
+
         var sut = new AnthropicApiService(client);
 
         // Act

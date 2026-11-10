@@ -164,4 +164,82 @@ public class AnthropicAuthServiceTests
         nearExpiry.IsExpired(TimeSpan.FromMinutes(5)).Should().BeTrue();
         farExpiry.IsExpired(TimeSpan.FromMinutes(5)).Should().BeFalse();
     }
+
+    [Fact]
+    public void OAuthTokens_IsWebSessionExpired_UsesRefreshTokenExpiresAt()
+    {
+        // Arrange
+        var webActive = new OAuthTokens
+        {
+            AccessToken = "token",
+            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-10), // Access token expired
+            RefreshTokenExpiresAt = DateTimeOffset.UtcNow.AddDays(25) // Web session valid
+        };
+
+        var webExpired = new OAuthTokens
+        {
+            AccessToken = "token",
+            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-10),
+            RefreshTokenExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1)
+        };
+
+        // Act & Assert
+        webActive.IsExpired().Should().BeTrue();
+        webActive.IsWebSessionExpired().Should().BeFalse();
+
+        webExpired.IsExpired().Should().BeTrue();
+        webExpired.IsWebSessionExpired().Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task RefreshTokensAsync_PreservesRefreshTokenExpiresAt_AndSendsUserAgent()
+    {
+        // Arrange
+        string capturedUserAgent = string.Empty;
+        var handler = new TestHttpMessageHandler(async (req, ct) =>
+        {
+            capturedUserAgent = req.Headers.UserAgent.ToString();
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"access_token\": \"at-refreshed\", \"refresh_token\": \"rt-refreshed\", \"expires_in\": 7200}")
+            };
+            return response;
+        });
+
+        var client = new HttpClient(handler);
+        var sut = new AnthropicAuthService(client);
+
+        var webExp = DateTimeOffset.UtcNow.AddDays(28);
+        var current = new OAuthTokens
+        {
+            AccessToken = "at-old",
+            RefreshToken = "rt-old",
+            RefreshTokenExpiresAt = webExp
+        };
+
+        // Act
+        var result = await sut.RefreshTokensAsync(current);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.AccessToken.Should().Be("at-refreshed");
+        result.RefreshTokenExpiresAt.Should().Be(webExp);
+        capturedUserAgent.Should().Contain("Claude-Code");
+    }
+
+    [Fact]
+    public void LaunchCliLogin_WhenCustomLauncherConfigured_InvokesLauncher()
+    {
+        // Arrange
+        bool launcherCalled = false;
+        var handler = new TestHttpMessageHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)));
+        var client = new HttpClient(handler);
+        var sut = new AnthropicAuthService(client, cliLauncher: () => launcherCalled = true);
+
+        // Act
+        sut.LaunchCliLogin();
+
+        // Assert
+        launcherCalled.Should().BeTrue();
+    }
 }

@@ -2,8 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Media;
 using VSNAiRateTracker.Models;
@@ -125,6 +127,8 @@ public class SettingsViewModel : INotifyPropertyChanged
     private bool _isStatusSuccess;
     private bool _isTestingConnection;
     private bool _isLoggingIn;
+    private bool _isWaitingForCliLogin;
+    private CancellationTokenSource? _pollingCts;
     private string _sessionStatusText = "Sesión no iniciada.";
     private bool _isLoggedInWithWeb;
 
@@ -227,6 +231,12 @@ public class SettingsViewModel : INotifyPropertyChanged
     {
         get => _isLoggingIn;
         set => SetField(ref _isLoggingIn, value);
+    }
+
+    public bool IsWaitingForCliLogin
+    {
+        get => _isWaitingForCliLogin;
+        set => SetField(ref _isWaitingForCliLogin, value);
     }
 
     public int SyncIntervalMinutes
@@ -610,6 +620,74 @@ public class SettingsViewModel : INotifyPropertyChanged
         }
     }
 
+    public async Task LaunchTerminalLoginAndPollAsync(CancellationToken cancellationToken = default)
+    {
+        _authService.LaunchCliLogin();
+        await StartCliPollingAsync(cancellationToken);
+    }
+
+    public async Task StartCliPollingAsync(CancellationToken cancellationToken = default)
+    {
+        StopPolling();
+        _pollingCts = new CancellationTokenSource();
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(_pollingCts.Token, cancellationToken);
+        var token = linked.Token;
+
+        IsWaitingForCliLogin = true;
+        StatusMessage = LocalizationService.Instance.GetString("Auth.WaitingForLogin");
+        IsStatusSuccess = true;
+
+        try
+        {
+            var stopwatch = Stopwatch.StartNew();
+            while (!token.IsCancellationRequested && stopwatch.Elapsed < TimeSpan.FromMinutes(5))
+            {
+                var imported = await _authService.TryImportFromClaudeCliAsync(token);
+                if (imported != null && !imported.IsExpired())
+                {
+                    AuthTokens = imported;
+                    var config = ToConfig();
+                    config.AuthTokens = imported;
+                    await _storageService.SaveConfigAsync(config, token);
+
+                    IsWaitingForCliLogin = false;
+                    UpdateSessionStatus();
+                    StatusMessage = LocalizationService.Instance.GetString("Auth.LoginDetectedSuccess");
+                    IsStatusSuccess = true;
+                    return;
+                }
+
+                await Task.Delay(2000, token);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Polling cancelled (e.g. window closed or user aborted)
+        }
+        finally
+        {
+            IsWaitingForCliLogin = false;
+        }
+    }
+
+    public void StopPolling()
+    {
+        if (_pollingCts != null)
+        {
+            try
+            {
+                _pollingCts.Cancel();
+                _pollingCts.Dispose();
+            }
+            catch
+            {
+                // Best effort
+            }
+            _pollingCts = null;
+        }
+        IsWaitingForCliLogin = false;
+    }
+
     public async Task<bool> ImportFromClaudeCliAsync()
     {
         IsLoggingIn = true;
@@ -619,20 +697,20 @@ public class SettingsViewModel : INotifyPropertyChanged
         try
         {
             var tokens = await _authService.TryImportFromClaudeCliAsync();
-            if (tokens != null)
+            if (tokens != null && !tokens.IsExpired())
             {
                 AuthTokens = tokens;
                 var config = ToConfig();
                 config.AuthTokens = tokens;
                 await _storageService.SaveConfigAsync(config);
 
-                StatusMessage = "✓ Credenciales de Claude Code importadas y verificadas con éxito.";
+                StatusMessage = LocalizationService.Instance.GetString("Auth.LoginDetectedSuccess");
                 IsStatusSuccess = true;
                 return true;
             }
             else
             {
-                StatusMessage = "No se encontraron credenciales en ~/.claude/.credentials.json. Inicia sesión con el botón Web.";
+                StatusMessage = "No se encontraron credenciales válidas en ~/.claude/.credentials.json. Abre el terminal e inicia sesión con 'claude auth login'.";
                 IsStatusSuccess = false;
                 return false;
             }
@@ -725,7 +803,7 @@ public class SettingsViewModel : INotifyPropertyChanged
         var loc = LocalizationService.Instance;
         if (_authTokens != null && !string.IsNullOrWhiteSpace(_authTokens.AccessToken))
         {
-            if (_authTokens.IsExpired())
+            if (_authTokens.IsWebSessionExpired())
             {
                 IsLoggedInWithWeb = false;
                 SessionStatusText = loc.GetString("Auth.SessionExpired");
@@ -733,7 +811,8 @@ public class SettingsViewModel : INotifyPropertyChanged
             else
             {
                 IsLoggedInWithWeb = true;
-                SessionStatusText = loc.GetString("Auth.SessionActive", _authTokens.ExpiresAt.ToLocalTime());
+                var validUntil = (_authTokens.RefreshTokenExpiresAt ?? _authTokens.ExpiresAt).ToLocalTime();
+                SessionStatusText = loc.GetString("Auth.SessionActive", validUntil);
             }
         }
         else

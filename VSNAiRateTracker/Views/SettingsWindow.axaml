@@ -71,10 +71,10 @@
 
                         <!-- Action buttons with WrapPanel to prevent truncation -->
                         <WrapPanel Orientation="Horizontal" Margin="0,4,0,0">
-                            <Button Content="{Binding [Auth.BtnSignIn]}"
+                            <Button Content="{Binding [Auth.BtnOpenTerminalLogin]}"
                                     Classes="accent"
-                                    Click="OnLoginWithWebClick"
-                                    IsEnabled="{Binding !IsLoggingIn}"
+                                    Click="OnOpenTerminalLoginClick"
+                                    IsEnabled="{Binding !IsWaitingForCliLogin}"
                                     Margin="0,0,8,8" />
 
                             <Button Content="{Binding [Auth.BtnImport]}"
@@ -87,6 +87,12 @@
                                     IsVisible="{Binding IsLoggedInWithWeb}"
                                     Margin="0,0,8,8" />
                         </WrapPanel>
+
+                        <!-- Polling progress indicator -->
+                        <ProgressBar IsIndeterminate="True"
+                                     Height="4"
+                                     IsVisible="{Binding IsWaitingForCliLogin}"
+                                     Margin="0,2,0,4" />
                     </StackPanel>
                 </Border>
 

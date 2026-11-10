@@ -7,6 +7,7 @@ public class OAuthTokens
     public string AccessToken { get; set; } = string.Empty;
     public string RefreshToken { get; set; } = string.Empty;
     public DateTimeOffset ExpiresAt { get; set; }
+    public DateTimeOffset? RefreshTokenExpiresAt { get; set; }
     public string TokenType { get; set; } = "Bearer";
 
     public bool IsExpired(TimeSpan? buffer = null)
@@ -20,6 +21,17 @@ public class OAuthTokens
 
         var threshold = ExpiresAt - bufferSpan;
         return DateTimeOffset.UtcNow >= threshold;
+    }
+
+    public bool IsWebSessionExpired(TimeSpan? buffer = null)
+    {
+        if (RefreshTokenExpiresAt.HasValue)
+        {
+            var bufferSpan = buffer ?? TimeSpan.FromMinutes(5);
+            return DateTimeOffset.UtcNow >= (RefreshTokenExpiresAt.Value - bufferSpan);
+        }
+
+        return IsExpired(buffer);
     }
 
     public bool HasValidRefreshToken => !string.IsNullOrWhiteSpace(RefreshToken);

@@ -28,6 +28,7 @@ public class AnthropicAuthService : IAnthropicAuthService
     // Pluggable delegates for testability
     private readonly Func<string, Task>? _browserLauncher;
     private readonly Func<int, string, CancellationToken, Task<(string code, string state)>>? _codeReceiver;
+    private readonly Action? _cliLauncher;
 
     public AnthropicAuthService(
         HttpClient httpClient,
@@ -36,7 +37,8 @@ public class AnthropicAuthService : IAnthropicAuthService
         string? tokenEndpoint = null,
         string? scope = null,
         Func<string, Task>? browserLauncher = null,
-        Func<int, string, CancellationToken, Task<(string code, string state)>>? codeReceiver = null)
+        Func<int, string, CancellationToken, Task<(string code, string state)>>? codeReceiver = null,
+        Action? cliLauncher = null)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _clientId = clientId ?? DefaultClientId;
@@ -45,6 +47,7 @@ public class AnthropicAuthService : IAnthropicAuthService
         _scope = scope ?? DefaultScope;
         _browserLauncher = browserLauncher;
         _codeReceiver = codeReceiver;
+        _cliLauncher = cliLauncher;
     }
 
     public async Task<OAuthTokens> StartInteractiveLoginAsync(CancellationToken cancellationToken = default)
@@ -93,6 +96,68 @@ public class AnthropicAuthService : IAnthropicAuthService
         return await PostTokenExchangeAsync(tokenRequest, cancellationToken);
     }
 
+    public void LaunchCliLogin()
+    {
+        if (_cliLauncher != null)
+        {
+            _cliLauncher();
+            return;
+        }
+
+        var claudeCmd = FindClaudeCliCommand();
+
+        if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = $"/k \"\"{claudeCmd}\" auth login\"",
+                UseShellExecute = true
+            };
+            Process.Start(psi);
+        }
+        else if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.OSX))
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "open",
+                Arguments = $"-a Terminal -n --args {claudeCmd} auth login",
+                UseShellExecute = true
+            });
+        }
+        else
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "x-terminal-emulator",
+                Arguments = $"-e {claudeCmd} auth login",
+                UseShellExecute = true
+            });
+        }
+    }
+
+    private static string FindClaudeCliCommand()
+    {
+        if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
+        {
+            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var localBin = Path.Combine(userProfile, ".local", "bin", "claude.exe");
+            if (File.Exists(localBin))
+            {
+                return localBin;
+            }
+
+            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            var npmCmd = Path.Combine(appData, "npm", "claude.cmd");
+            if (File.Exists(npmCmd))
+            {
+                return npmCmd;
+            }
+        }
+
+        return "claude";
+    }
+
     public async Task<OAuthTokens?> RefreshTokensAsync(OAuthTokens currentTokens, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(currentTokens);
@@ -111,8 +176,14 @@ public class AnthropicAuthService : IAnthropicAuthService
 
         try
         {
-            var content = new StringContent(JsonSerializer.Serialize(refreshRequest), Encoding.UTF8, "application/json");
-            using var response = await _httpClient.PostAsync(_tokenEndpoint, content, cancellationToken);
+            var jsonPayload = JsonSerializer.Serialize(refreshRequest);
+            using var request = new HttpRequestMessage(HttpMethod.Post, _tokenEndpoint)
+            {
+                Content = new StringContent(jsonPayload, Encoding.UTF8, "application/json")
+            };
+            request.Headers.UserAgent.ParseAdd("Claude-Code/2.1.319");
+
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
 
             if (response.StatusCode == HttpStatusCode.BadRequest || response.StatusCode == HttpStatusCode.Unauthorized)
             {
@@ -135,6 +206,7 @@ public class AnthropicAuthService : IAnthropicAuthService
                 AccessToken = accessToken,
                 RefreshToken = refreshToken,
                 ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(expiresIn),
+                RefreshTokenExpiresAt = currentTokens.RefreshTokenExpiresAt,
                 TokenType = root.TryGetProperty("token_type", out var tt) ? tt.GetString() ?? "Bearer" : "Bearer"
             };
         }
@@ -174,6 +246,12 @@ public class AnthropicAuthService : IAnthropicAuthService
                 expiresAt = DateTimeOffset.FromUnixTimeMilliseconds(expMs);
             }
 
+            DateTimeOffset? refreshTokenExpiresAt = null;
+            if (oauthSection.TryGetProperty("refreshTokenExpiresAt", out var refExpVal) && refExpVal.TryGetInt64(out var refExpMs))
+            {
+                refreshTokenExpiresAt = DateTimeOffset.FromUnixTimeMilliseconds(refExpMs);
+            }
+
             if (string.IsNullOrWhiteSpace(accessToken) && string.IsNullOrWhiteSpace(refreshToken))
             {
                 return null;
@@ -184,15 +262,17 @@ public class AnthropicAuthService : IAnthropicAuthService
                 AccessToken = accessToken,
                 RefreshToken = refreshToken,
                 ExpiresAt = expiresAt,
+                RefreshTokenExpiresAt = refreshTokenExpiresAt,
                 TokenType = "Bearer"
             };
 
-            // If the token is already expired, refresh it automatically using the refreshToken
+            // If the access token is already expired, try to refresh it silently using the refreshToken
             if (tokens.IsExpired() && !string.IsNullOrWhiteSpace(tokens.RefreshToken))
             {
                 var refreshed = await RefreshTokensAsync(tokens, cancellationToken);
                 if (refreshed != null)
                 {
+                    refreshed.RefreshTokenExpiresAt = refreshTokenExpiresAt;
                     return refreshed;
                 }
             }
@@ -208,8 +288,13 @@ public class AnthropicAuthService : IAnthropicAuthService
     private async Task<OAuthTokens> PostTokenExchangeAsync(object requestPayload, CancellationToken cancellationToken)
     {
         var jsonPayload = JsonSerializer.Serialize(requestPayload);
-        var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
-        using var response = await _httpClient.PostAsync(_tokenEndpoint, content, cancellationToken);
+        using var request = new HttpRequestMessage(HttpMethod.Post, _tokenEndpoint)
+        {
+            Content = new StringContent(jsonPayload, Encoding.UTF8, "application/json")
+        };
+        request.Headers.UserAgent.ParseAdd("Claude-Code/2.1.319");
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
 
         if (!response.IsSuccessStatusCode)
         {

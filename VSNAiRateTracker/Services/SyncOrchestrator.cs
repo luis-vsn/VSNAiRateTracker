@@ -101,15 +101,24 @@ public class SyncOrchestrator : ISyncOrchestrator
             if (config.AuthTokens != null && config.AuthTokens.IsExpired(TimeSpan.FromMinutes(5)))
             {
                 using var refreshSpan = _telemetryService?.StartActivity("RefreshToken");
+                
+                // First try: refresh token via OAuth endpoint
                 var refreshedTokens = await _authService.RefreshTokensAsync(config.AuthTokens, cancellationToken);
-                if (refreshedTokens != null)
+                
+                // Second try: check if Claude CLI credentials on disk are updated
+                if (refreshedTokens == null || refreshedTokens.IsExpired())
+                {
+                    refreshedTokens = await _authService.TryImportFromClaudeCliAsync(cancellationToken);
+                }
+
+                if (refreshedTokens != null && !refreshedTokens.IsExpired())
                 {
                     config.AuthTokens = refreshedTokens;
                     await _storageService.SaveConfigAsync(config, cancellationToken);
                 }
                 else
                 {
-                    _trayManager.SetAlert("VSNAiRateTracker - Sesión de Anthropic expirada. Haz clic para volver a iniciar sesión.", isCritical: true);
+                    _trayManager.SetAlert("VSNAiRateTracker - Sesión de Anthropic expirada. Abre un terminal e inicia sesión con 'claude auth login'.", isCritical: true);
                     _telemetryService?.LogWarning("Sesión de Anthropic expirada; no se pudo refrescar.");
                     _telemetryService?.ForceFlush();
                     return;
@@ -135,7 +144,12 @@ public class SyncOrchestrator : ISyncOrchestrator
                     if (config.AuthTokens != null)
                     {
                         var refreshedTokens = await _authService.RefreshTokensAsync(config.AuthTokens, cancellationToken);
-                        if (refreshedTokens != null)
+                        if (refreshedTokens == null || refreshedTokens.IsExpired())
+                        {
+                            refreshedTokens = await _authService.TryImportFromClaudeCliAsync(cancellationToken);
+                        }
+
+                        if (refreshedTokens != null && !refreshedTokens.IsExpired())
                         {
                             config.AuthTokens = refreshedTokens;
                             await _storageService.SaveConfigAsync(config, cancellationToken);
@@ -145,7 +159,7 @@ public class SyncOrchestrator : ISyncOrchestrator
 
                     if (!result.IsSuccess)
                     {
-                        _trayManager.SetAlert("VSNAiRateTracker - Sesión de Anthropic expirada. Haz clic para iniciar sesión de nuevo.", isCritical: true);
+                        _trayManager.SetAlert("VSNAiRateTracker - Sesión de Anthropic expirada. Abre un terminal e inicia sesión con 'claude auth login'.", isCritical: true);
                         _telemetryService?.LogError($"Sesión expirada tras intento de refresco: {result.ErrorMessage}");
                         _telemetryService?.ForceFlush();
                         return;

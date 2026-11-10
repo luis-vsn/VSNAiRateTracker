@@ -9,5 +9,6 @@ public interface IAnthropicAuthService
     Task<OAuthTokens> StartInteractiveLoginAsync(CancellationToken cancellationToken = default);
     Task<OAuthTokens?> RefreshTokensAsync(OAuthTokens currentTokens, CancellationToken cancellationToken = default);
     Task<OAuthTokens?> TryImportFromClaudeCliAsync(CancellationToken cancellationToken = default);
+    void LaunchCliLogin();
 }
 

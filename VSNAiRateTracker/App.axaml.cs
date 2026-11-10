@@ -78,10 +78,10 @@ public partial class App : Application
         }
         LocalizationService.Instance.CurrentLanguage = config.Language;
 
-        if (!config.HasCredentials)
+        if (!config.HasCredentials || (config.AuthTokens != null && config.AuthTokens.IsExpired()))
         {
             var imported = await _authService.TryImportFromClaudeCliAsync();
-            if (imported != null)
+            if (imported != null && !imported.IsExpired())
             {
                 config.AuthTokens = imported;
                 await _storageService.SaveConfigAsync(config);
@@ -91,8 +91,25 @@ public partial class App : Application
                 }
                 return;
             }
+            else if (config.AuthTokens != null && !string.IsNullOrWhiteSpace(config.AuthTokens.RefreshToken))
+            {
+                var refreshed = await _authService.RefreshTokensAsync(config.AuthTokens);
+                if (refreshed != null && !refreshed.IsExpired())
+                {
+                    config.AuthTokens = refreshed;
+                    await _storageService.SaveConfigAsync(config);
+                    if (_orchestrator != null)
+                    {
+                        _ = _orchestrator.SyncOnceAsync();
+                    }
+                    return;
+                }
+            }
 
-            await Dispatcher.UIThread.InvokeAsync(OpenSettingsWindow);
+            if (!config.HasCredentials)
+            {
+                await Dispatcher.UIThread.InvokeAsync(OpenSettingsWindow);
+            }
         }
     }
 

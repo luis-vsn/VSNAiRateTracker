@@ -133,7 +133,7 @@ public class SettingsViewModelTests
         result.Should().BeTrue();
         _sut.IsLoggedInWithWeb.Should().BeTrue();
         _sut.AuthTokens.Should().Be(tokens);
-        _sut.SessionStatusText.Should().Contain("Web Signing");
+        _sut.SessionStatusText.Should().Contain("Claude Code");
         _storageMock.Verify(s => s.SaveConfigAsync(It.Is<AppConfig>(c => c.AuthTokens == tokens), It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -238,5 +238,55 @@ public class SettingsViewModelTests
         _sut["Threshold.ColorWarningFast"].Should().Be("Acelerado");
         _sut["Threshold.ColorDangerFast"].Should().Be("Excesivo");
         _sut["Threshold.ColorSlow"].Should().Be("Lento");
+    }
+
+    [Fact]
+    public async Task ImportFromClaudeCliAsync_WithRefreshTokenExpiresAt_DisplaysWebExpirationDate()
+    {
+        // Arrange
+        var webExp = DateTimeOffset.UtcNow.AddDays(30);
+        var tokens = new OAuthTokens
+        {
+            AccessToken = "at-cli-token",
+            RefreshToken = "rt-cli-token",
+            ExpiresAt = DateTimeOffset.UtcNow.AddHours(5),
+            RefreshTokenExpiresAt = webExp
+        };
+        _authMock.Setup(a => a.TryImportFromClaudeCliAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(tokens);
+
+        // Act
+        var result = await _sut.ImportFromClaudeCliAsync();
+
+        // Assert
+        result.Should().BeTrue();
+        _sut.IsLoggedInWithWeb.Should().BeTrue();
+        _sut.SessionStatusText.Should().Contain(webExp.ToLocalTime().ToString("g"));
+        _sut.SessionStatusText.Should().Contain("Claude Code");
+    }
+
+    [Fact]
+    public async Task LaunchTerminalLoginAndPollAsync_CallsCliLoginAndPollsCredentials()
+    {
+        // Arrange
+        var tokens = new OAuthTokens
+        {
+            AccessToken = "at-cli-new",
+            RefreshToken = "rt-cli-new",
+            ExpiresAt = DateTimeOffset.UtcNow.AddHours(8)
+        };
+
+        _authMock.Setup(a => a.LaunchCliLogin()).Verifiable();
+        _authMock.Setup(a => a.TryImportFromClaudeCliAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(tokens);
+
+        // Act
+        await _sut.LaunchTerminalLoginAndPollAsync();
+
+        // Assert
+        _authMock.Verify(a => a.LaunchCliLogin(), Times.Once);
+        _sut.IsLoggedInWithWeb.Should().BeTrue();
+        _sut.AuthTokens.Should().Be(tokens);
+        _sut.IsWaitingForCliLogin.Should().BeFalse();
     }
 }
