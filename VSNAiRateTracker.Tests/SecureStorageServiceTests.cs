@@ -15,16 +15,25 @@ public class SecureStorageServiceTests : IDisposable
 {
     private readonly string _tempDirectory;
     private readonly ISecureStorageService _sut;
+    private readonly IKeyProtectionProvider? _keyProtection;
+    private readonly string _keychainService = "VSNAiRateTracker.Tests." + Guid.NewGuid().ToString("N");
 
     public SecureStorageServiceTests()
     {
         _tempDirectory = Path.Combine(Path.GetTempPath(), "VSNAiRateTrackerTests_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_tempDirectory);
-        _sut = new SecureStorageService(_tempDirectory);
+        // On macOS isolate the Keychain wrapping key so tests never create the production item
+        _keyProtection = OperatingSystem.IsMacOS() ? new MacKeychainKeyProtectionProvider(_keychainService) : null;
+        _sut = new SecureStorageService(_tempDirectory, _keyProtection);
     }
 
     public void Dispose()
     {
+        if (OperatingSystem.IsMacOS())
+        {
+            try { MacKeychain.Delete(_keychainService, MacKeychainKeyProtectionProvider.DefaultAccount); } catch { /* best effort */ }
+        }
+
         if (Directory.Exists(_tempDirectory))
         {
             try
@@ -170,7 +179,7 @@ public class SecureStorageServiceTests : IDisposable
         """;
         await File.WriteAllTextAsync(defaultsFile, defaultsJson);
 
-        var service = new SecureStorageService(_tempDirectory, defaultsFilePath: defaultsFile);
+        var service = new SecureStorageService(_tempDirectory, _keyProtection, defaultsFilePath: defaultsFile);
 
         // Act
         var config = await service.LoadConfigAsync();
@@ -201,7 +210,7 @@ public class SecureStorageServiceTests : IDisposable
         """;
         await File.WriteAllTextAsync(defaultsFile, defaultsJson);
 
-        var service = new SecureStorageService(_tempDirectory, defaultsFilePath: defaultsFile);
+        var service = new SecureStorageService(_tempDirectory, _keyProtection, defaultsFilePath: defaultsFile);
 
         // Save existing user config with custom endpoint and disabled telemetry
         var existingConfig = new AppConfig

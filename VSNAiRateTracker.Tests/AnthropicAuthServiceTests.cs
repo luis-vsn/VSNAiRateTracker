@@ -242,4 +242,38 @@ public class AnthropicAuthServiceTests
         // Assert
         launcherCalled.Should().BeTrue();
     }
+
+    [Fact]
+    public async Task TryImportFromClaudeCliAsync_ParsesClaudeCodeSessionJson()
+    {
+        // Arrange: same payload Claude Code stores in ~/.claude/.credentials.json or the macOS Keychain
+        var expiresAt = DateTimeOffset.UtcNow.AddHours(4);
+        var refreshExpiresAt = DateTimeOffset.UtcNow.AddDays(30);
+        var json = "{\"claudeAiOauth\":{\"accessToken\":\"at-keychain\",\"refreshToken\":\"rt-keychain\"," +
+                   $"\"expiresAt\":{expiresAt.ToUnixTimeMilliseconds()},\"refreshTokenExpiresAt\":{refreshExpiresAt.ToUnixTimeMilliseconds()}," +
+                   "\"scopes\":[\"user:inference\"],\"subscriptionType\":\"max\"}}";
+        var handler = new TestHttpMessageHandler((_, _) => throw new InvalidOperationException("No HTTP expected"));
+        var sut = new AnthropicAuthService(new HttpClient(handler), claudeCredentialsReader: _ => Task.FromResult<string?>(json));
+
+        // Act
+        var result = await sut.TryImportFromClaudeCliAsync();
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.AccessToken.Should().Be("at-keychain");
+        result.RefreshToken.Should().Be("rt-keychain");
+        result.ExpiresAt.ToUnixTimeMilliseconds().Should().Be(expiresAt.ToUnixTimeMilliseconds());
+        result.RefreshTokenExpiresAt!.Value.ToUnixTimeMilliseconds().Should().Be(refreshExpiresAt.ToUnixTimeMilliseconds());
+    }
+
+    [Fact]
+    public async Task TryImportFromClaudeCliAsync_WhenNoSessionFound_ReturnsNull()
+    {
+        var handler = new TestHttpMessageHandler((_, _) => throw new InvalidOperationException("No HTTP expected"));
+        var sut = new AnthropicAuthService(new HttpClient(handler), claudeCredentialsReader: _ => Task.FromResult<string?>(null));
+
+        var result = await sut.TryImportFromClaudeCliAsync();
+
+        result.Should().BeNull();
+    }
 }

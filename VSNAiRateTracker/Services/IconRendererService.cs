@@ -71,12 +71,7 @@ public class IconRendererService : IIconRendererService
 
         var displayText = string.IsNullOrWhiteSpace(text) ? "+0.0" : text.Trim();
 
-        // Prefer Bahnschrift (Windows standard DIN-1451 font for high-legibility dials/gauges), fallback to Segoe UI Black, Arial
-        using var typeface = SKTypeface.FromFamilyName("Bahnschrift", SKFontStyleWeight.Bold, SKFontStyleWidth.Condensed, SKFontStyleSlant.Upright)
-            ?? SKTypeface.FromFamilyName("Segoe UI Variable Display", SKFontStyleWeight.Black, SKFontStyleWidth.Condensed, SKFontStyleSlant.Upright)
-            ?? SKTypeface.FromFamilyName("Segoe UI", SKFontStyleWeight.Black, SKFontStyleWidth.Condensed, SKFontStyleSlant.Upright)
-            ?? SKTypeface.FromFamilyName("Arial", SKFontStyleWeight.Bold, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright)
-            ?? SKTypeface.Default;
+        using var typeface = ResolveBadgeTypeface();
 
         // Outer dark stroke to guarantee contrast on both dark and light taskbars
         float strokeWidth = Math.Max(1.0f, size * 0.045f);
@@ -150,6 +145,36 @@ public class IconRendererService : IIconRendererService
         canvas.DrawText(displayText, originX, originY, SKTextAlign.Left, font, fillPaint);
 
         return bitmap;
+    }
+
+    // DIN-1451 style faces first for high-legibility dial digits: Bahnschrift (Windows), DIN Alternate (macOS)
+    private static readonly (string family, SKFontStyleWeight weight, SKFontStyleWidth width)[] BadgeTypefaceCandidates =
+    [
+        ("Bahnschrift", SKFontStyleWeight.Bold, SKFontStyleWidth.Condensed),
+        ("DIN Alternate", SKFontStyleWeight.Bold, SKFontStyleWidth.Normal),
+        ("Segoe UI Variable Display", SKFontStyleWeight.Black, SKFontStyleWidth.Condensed),
+        ("Segoe UI", SKFontStyleWeight.Black, SKFontStyleWidth.Condensed),
+        ("Arial", SKFontStyleWeight.Bold, SKFontStyleWidth.Normal)
+    ];
+
+    /// <summary>
+    /// Returns the first installed candidate face. FromFamilyName never returns null on macOS
+    /// (CoreText substitutes Helvetica), so the resolved family name is checked explicitly.
+    /// </summary>
+    private static SKTypeface ResolveBadgeTypeface()
+    {
+        foreach (var (family, weight, width) in BadgeTypefaceCandidates)
+        {
+            var typeface = SKTypeface.FromFamilyName(family, weight, width, SKFontStyleSlant.Upright);
+            if (typeface != null && string.Equals(typeface.FamilyName, family, StringComparison.OrdinalIgnoreCase))
+            {
+                return typeface;
+            }
+            typeface?.Dispose();
+        }
+
+        return SKTypeface.FromFamilyName(null, SKFontStyleWeight.Bold, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright)
+            ?? SKTypeface.Default;
     }
 
     // ------------------------------------------------------------------------------------------------

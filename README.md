@@ -24,6 +24,7 @@ Aplicación de escritorio ligera para la bandeja del sistema (*System Tray* / *M
 * **Almacenamiento seguro autenticado (`SecureStorageService`):**
   * Cifrado simétrico autenticado **AES-GCM (256 bits)**.
   * Protección de la clave maestra en disco mediante **DPAPI** de Windows (`ProtectedData`), asegurando que ningún token sensible se guarde en texto claro en `%APPDATA%/VSNAiRateTracker/config.enc`.
+  * En **macOS** la clave maestra se envuelve (AES-GCM) con una clave guardada en el **Llavero** del usuario (servicio `VSNAiRateTracker`), y los ficheros (`~/Library/Application Support/VSNAiRateTracker/`) se crean con permisos `0600`. Las claves del esquema anterior (solo ofuscación) se migran automáticamente al arrancar.
 
 * **Cliente API Anthropic Resiliente (`AnthropicApiService`):**
   * Consulta periódica cada 5 minutos (configurable).
@@ -148,4 +149,16 @@ Las métricas `claude_code.*` se calculan leyendo las transcripciones locales de
 ## Estado Multiplataforma
 
 * **Windows:** Completado e implementado al 100% (Issues #1 a #7 cerrados).
-* **macOS:** El job de macOS en GitHub Actions es opcional (ejecución manual del workflow *CI* marcando *include_macos*) hasta validar la plataforma. Documentado en el **[Issue #8](https://github.com/luis-vsn/VSNAiRateTracker/issues/8)** para ser retomado por un compañero con hardware Mac (validación de Menu Bar, empaquetado DMG y soporte multilingüe).
+* **macOS ([Issue #8](https://github.com/luis-vsn/VSNAiRateTracker/issues/8)):** validado en Apple Silicon.
+  * App exclusiva de la **Menu Bar** (`LSUIElement`; tampoco muestra icono en el Dock al ejecutarse con `dotnet run`).
+  * Importa automáticamente la sesión de Claude Code desde el **Llavero** (`Claude Code-credentials`), donde la guarda Claude Code en macOS.
+  * Badge con la tipografía DIN Alternate (equivalente a Bahnschrift en Windows) y menú de la Menu Bar traducido (ES/EN).
+  * Empaquetado:
+
+    ```bash
+    ./packaging/macos/build-dmg.sh Release 0.0.1 osx-arm64   # Apple Silicon
+    ./packaging/macos/build-dmg.sh Release 0.0.1 osx-x64     # Intel
+    ```
+
+    Genera `packaging/dist/<runtime>/VSN AI Rate Tracker.app` y `packaging/dist/VSNAiRateTracker-<versión>-<runtime>.dmg`. Sin `CODESIGN_IDENTITY` la firma es *ad-hoc* (al descargarlo hay que abrirlo con clic derecho → Abrir); con un certificado *Developer ID* se firma con Hardened Runtime y, si se definen `NOTARY_KEYCHAIN_PROFILE` o `APPLE_ID`/`APPLE_TEAM_ID`/`APPLE_APP_PASSWORD`, se notariza. La telemetría se puede preactivar con `OTEL_EXPORTER_OTLP_ENDPOINT` y `OTEL_EXPORTER_OTLP_HEADERS`, igual que en Windows.
+  * El job de macOS en GitHub Actions sigue siendo opcional (ejecución manual del workflow *CI* marcando *include_macos*).

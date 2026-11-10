@@ -3,21 +3,31 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>VSNAiRateTracker</string>
+    <string>VSN AI Rate Tracker</string>
     <key>CFBundleDisplayName</key>
-    <string>VSNAiRateTracker</string>
+    <string>VSN AI Rate Tracker</string>
     <key>CFBundleIdentifier</key>
     <string>com.vsn.airatetracker</string>
+    <!-- Versions are stamped by packaging/macos/build-dmg.sh from the build version -->
     <key>CFBundleVersion</key>
-    <string>1.0.0</string>
+    <string>0.0.1</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>0.0.1</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>CFBundleExecutable</key>
     <string>VSNAiRateTracker</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>en</string>
+        <string>es</string>
+    </array>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
     <key>NSHighResolutionCapable</key>
@@ -27,4 +37,3 @@
     <true/>
 </dict>
 </plist>
-

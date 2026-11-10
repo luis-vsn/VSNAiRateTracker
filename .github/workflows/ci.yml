@@ -68,16 +68,24 @@ jobs:
         name: windows-portable
         path: packaging/dist/*portable*.zip
 
-    - name: Build macOS DMG (macOS)
+    - name: Build macOS DMGs (Apple Silicon & Intel)
       if: matrix.os == 'macos-latest'
       run: |
         chmod +x ./packaging/macos/build-dmg.sh
         ./packaging/macos/build-dmg.sh Release 0.0.1 osx-arm64
+        ./packaging/macos/build-dmg.sh Release 0.0.1 osx-x64
 
-    - name: Upload macOS Artifacts
+    - name: Upload macOS DMG (Apple Silicon)
       if: matrix.os == 'macos-latest'
       uses: actions/upload-artifact@v6
       with:
-        name: macos-dmg
-        path: packaging/dist/*.dmg
+        name: macos-dmg-arm64
+        path: packaging/dist/*-osx-arm64.dmg
+
+    - name: Upload macOS DMG (Intel)
+      if: matrix.os == 'macos-latest'
+      uses: actions/upload-artifact@v6
+      with:
+        name: macos-dmg-x64
+        path: packaging/dist/*-osx-x64.dmg
 

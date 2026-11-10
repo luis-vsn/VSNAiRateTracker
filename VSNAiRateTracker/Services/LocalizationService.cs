@@ -108,7 +108,11 @@ public class LocalizationService : ILocalizationService
             ["Common.TestingConn"] = "Probando conexión con Anthropic...",
             ["Common.ConnSuccess"] = "✓ Conexión exitosa. Cuota consumida: {0:F1}%.",
             ["Common.ConnError"] = "✗ Error de conexión: {0}",
-            ["Tooltip.Format"] = "Anthropic: {0:F1}% gastado | Desfase: {1} ({2})"
+            ["Tooltip.Format"] = "Anthropic: {0:F1}% gastado | Desfase: {1} ({2})",
+            ["Tray.RefreshNow"] = "Actualizar ahora",
+            ["Tray.Settings"] = "Configuración...",
+            ["Tray.Exit"] = "Salir",
+            ["Tray.Initializing"] = "VSN AI Rate Tracker - Inicializando..."
         },
         ["en"] = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -187,7 +191,11 @@ public class LocalizationService : ILocalizationService
             ["Common.TestingConn"] = "Testing connection with Anthropic...",
             ["Common.ConnSuccess"] = "✓ Connection successful. Consumed quota: {0:F1}%.",
             ["Common.ConnError"] = "✗ Connection error: {0}",
-            ["Tooltip.Format"] = "Anthropic: {0:F1}% used | Delta: {1} ({2})"
+            ["Tooltip.Format"] = "Anthropic: {0:F1}% used | Delta: {1} ({2})",
+            ["Tray.RefreshNow"] = "Refresh now",
+            ["Tray.Settings"] = "Settings...",
+            ["Tray.Exit"] = "Quit",
+            ["Tray.Initializing"] = "VSN AI Rate Tracker - Initializing..."
         }
     };
 

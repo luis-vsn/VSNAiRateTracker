@@ -11,6 +11,9 @@ public class TrayIconManager : ITrayIconManager
 {
     private readonly IIconRendererService _iconRenderer;
     private TrayIcon? _trayIcon;
+    private NativeMenuItem? _refreshItem;
+    private NativeMenuItem? _settingsItem;
+    private NativeMenuItem? _exitItem;
     private bool _isDisposed;
 
     public TrayIconManager(IIconRendererService? iconRenderer = null)
@@ -26,16 +29,17 @@ public class TrayIconManager : ITrayIconManager
 
         Dispatcher.UIThread.Post(() =>
         {
+            var loc = LocalizationService.Instance;
             _trayIcon = new TrayIcon
             {
-                ToolTipText = "VSNAiRateTracker - Inicializando...",
+                ToolTipText = loc.GetString("Tray.Initializing"),
                 IsVisible = true,
                 Icon = _iconRenderer.RenderTrayBadgeIcon(0.0, "...")
             };
 
             var menu = new NativeMenu();
 
-            var refreshItem = new NativeMenuItem("Actualizar ahora");
+            var refreshItem = new NativeMenuItem(loc.GetString("Tray.RefreshNow"));
             refreshItem.Click += async (_, _) =>
             {
                 try
@@ -49,17 +53,21 @@ public class TrayIconManager : ITrayIconManager
             };
             menu.Add(refreshItem);
 
-            var settingsItem = new NativeMenuItem("Configuración...");
+            var settingsItem = new NativeMenuItem(loc.GetString("Tray.Settings"));
             settingsItem.Click += (_, _) => onOpenSettings();
             menu.Add(settingsItem);
 
             menu.Add(new NativeMenuItemSeparator());
 
-            var exitItem = new NativeMenuItem("Salir");
+            var exitItem = new NativeMenuItem(loc.GetString("Tray.Exit"));
             exitItem.Click += (_, _) => onExit();
             menu.Add(exitItem);
 
             _trayIcon.Menu = menu;
+            _refreshItem = refreshItem;
+            _settingsItem = settingsItem;
+            _exitItem = exitItem;
+            loc.LanguageChanged += OnLanguageChanged;
             _trayIcon.Clicked += (_, _) => onOpenSettings();
 
             if (Application.Current != null)
@@ -72,6 +80,20 @@ public class TrayIconManager : ITrayIconManager
                 }
                 trayIcons.Add(_trayIcon);
             }
+        });
+    }
+
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_isDisposed)
+                return;
+
+            var loc = LocalizationService.Instance;
+            if (_refreshItem != null) _refreshItem.Header = loc.GetString("Tray.RefreshNow");
+            if (_settingsItem != null) _settingsItem.Header = loc.GetString("Tray.Settings");
+            if (_exitItem != null) _exitItem.Header = loc.GetString("Tray.Exit");
         });
     }
 
@@ -149,6 +171,7 @@ public class TrayIconManager : ITrayIconManager
             return;
 
         _isDisposed = true;
+        LocalizationService.Instance.LanguageChanged -= OnLanguageChanged;
 
         Dispatcher.UIThread.Post(() =>
         {
