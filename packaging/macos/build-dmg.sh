@@ -30,7 +30,8 @@ APP_BUNDLE="${DIST_DIR}/${RUNTIME}/${APP_NAME}.app"
 PUBLISH_DIR="${DIST_DIR}/macos-publish-${RUNTIME}"
 DMG_PATH="${DIST_DIR}/VSNAiRateTracker-${VERSION}-${RUNTIME}.dmg"
 ENTITLEMENTS="${SCRIPT_DIR}/entitlements.plist"
-ICON_SOURCE="${SCRIPT_DIR}/AppIcon-1024.png"
+# Single source of truth for the app icon (same asset used by the app and the Windows build)
+ICON_SOURCE="${ROOT_DIR}/VSNAiRateTracker/Assets/icon.png"
 
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "${WORK_DIR}"' EXIT
@@ -79,15 +80,24 @@ if [ -n "${OTEL_EXPORTER_OTLP_ENDPOINT:-}" ] && [ -n "${OTEL_EXPORTER_OTLP_HEADE
     echo "    Injected bundled telemetry defaults (telemetry pre-activated)."
 fi
 
-# 3. App icon (.icns) generated from the 1024px master
+# 3. App icon (.icns) generated from the app's icon asset. Only sizes up to the source
+#    resolution are emitted (never upscaled); macOS scales the largest one when needed.
 echo "--> [3/5] Generating AppIcon.icns..."
 ICONSET="${WORK_DIR}/AppIcon.iconset"
 mkdir -p "${ICONSET}"
+SOURCE_SIZE="$(sips -g pixelWidth "${ICON_SOURCE}" | awk '/pixelWidth/ {print $2}')"
 for size in 16 32 128 256 512; do
-    sips -z "${size}" "${size}" "${ICON_SOURCE}" --out "${ICONSET}/icon_${size}x${size}.png" >/dev/null
+    if [ "${size}" -le "${SOURCE_SIZE}" ]; then
+        sips -z "${size}" "${size}" "${ICON_SOURCE}" --out "${ICONSET}/icon_${size}x${size}.png" >/dev/null
+    fi
     double=$((size * 2))
-    sips -z "${double}" "${double}" "${ICON_SOURCE}" --out "${ICONSET}/icon_${size}x${size}@2x.png" >/dev/null
+    if [ "${double}" -le "${SOURCE_SIZE}" ]; then
+        sips -z "${double}" "${double}" "${ICON_SOURCE}" --out "${ICONSET}/icon_${size}x${size}@2x.png" >/dev/null
+    fi
 done
+if [ "${SOURCE_SIZE}" -lt 1024 ]; then
+    echo "    Note: icon source is ${SOURCE_SIZE}px; provide a 1024px icon for sharp large Finder/Launchpad icons."
+fi
 iconutil -c icns "${ICONSET}" -o "${APP_BUNDLE}/Contents/Resources/AppIcon.icns"
 
 # 4. Code signing
