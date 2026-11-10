@@ -254,56 +254,123 @@ public class IconRendererService : IIconRendererService
         return new WindowIcon(stream);
     }
 
+    private static SKBitmap? _cachedMasterIcon;
+    private static readonly object _masterLock = new();
+
+    private static SKBitmap? GetMasterAppIcon()
+    {
+        if (_cachedMasterIcon != null) return _cachedMasterIcon;
+
+        lock (_masterLock)
+        {
+            if (_cachedMasterIcon != null) return _cachedMasterIcon;
+
+            // 1. Try embedded manifest resource in assembly
+            try
+            {
+                using var resourceStream = typeof(IconRendererService).Assembly.GetManifestResourceStream("VSNAiRateTracker.Assets.icon.png");
+                if (resourceStream != null)
+                {
+                    _cachedMasterIcon = SKBitmap.Decode(resourceStream);
+                    if (_cachedMasterIcon != null) return _cachedMasterIcon;
+                }
+            }
+            catch
+            {
+                // Fallback to file system
+            }
+
+            // 2. Try file system relative to AppContext.BaseDirectory
+            try
+            {
+                var filePath = Path.Combine(AppContext.BaseDirectory, "Assets", "icon.png");
+                if (File.Exists(filePath))
+                {
+                    using var fileStream = File.OpenRead(filePath);
+                    _cachedMasterIcon = SKBitmap.Decode(fileStream);
+                    if (_cachedMasterIcon != null) return _cachedMasterIcon;
+                }
+            }
+            catch
+            {
+                // Ignore
+            }
+
+            return null;
+        }
+    }
+
     public SKBitmap RenderAppIconBitmap(int size = 64)
+    {
+        var master = GetMasterAppIcon();
+        if (master != null)
+        {
+            if (master.Width == size && master.Height == size)
+            {
+                return master.Copy();
+            }
+
+            var bitmap = new SKBitmap(size, size, SKColorType.Rgba8888, SKAlphaType.Premul);
+            using var canvas = new SKCanvas(bitmap);
+            canvas.Clear(SKColors.Transparent);
+            var destRect = new SKRect(0, 0, size, size);
+            using var paint = new SKPaint { IsAntialias = true };
+            canvas.DrawBitmap(master, destRect, new SKSamplingOptions(SKCubicResampler.CatmullRom), paint);
+            return bitmap;
+        }
+
+        // Fallback: draw official VSN logo vector squircle if master image is not found
+        return RenderFallbackVLogo(size);
+    }
+
+    private static SKBitmap RenderFallbackVLogo(int size)
     {
         var bitmap = new SKBitmap(size, size, SKColorType.Rgba8888, SKAlphaType.Premul);
         using var canvas = new SKCanvas(bitmap);
         canvas.Clear(SKColors.Transparent);
 
-        // Dark tech squircle background
-        using var bgPaint = new SKPaint
-        {
-            Color = SKColor.Parse("#0D1B2A"),
-            IsAntialias = true,
-            Style = SKPaintStyle.Fill
-        };
-        float cornerRadius = size * 0.22f;
-        canvas.DrawRoundRect(2f, 2f, size - 4f, size - 4f, cornerRadius, cornerRadius, bgPaint);
+        // VSN brand colors
+        var bg = SKColor.Parse("#1A262C");
+        var lime = SKColor.Parse("#ADC736");
+        var teal = SKColor.Parse("#008065");
+        var shadow = SKColor.Parse("#006B54");
 
-        // Tech outer glow / border
-        using var borderPaint = new SKPaint
-        {
-            Color = SKColor.Parse("#1B263B"),
-            IsAntialias = true,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = size * 0.03f
-        };
-        canvas.DrawRoundRect(2f, 2f, size - 4f, size - 4f, cornerRadius, cornerRadius, borderPaint);
+        float pad = Math.Max(1f, size * 0.02f);
+        var squircleRect = new SKRoundRect(new SKRect(pad, pad, size - pad, size - pad), size * 0.20f, size * 0.20f);
+        using var bgPaint = new SKPaint { Color = bg, IsAntialias = true, Style = SKPaintStyle.Fill };
+        canvas.DrawRoundRect(squircleRect, bgPaint);
 
-        // Modern stylized "V" with cyan-to-green gradient
-        using var shader = SKShader.CreateLinearGradient(
-            new SKPoint(size * 0.2f, size * 0.2f),
-            new SKPoint(size * 0.8f, size * 0.8f),
-            new[] { SKColor.Parse("#00F0FF"), SKColor.Parse("#2ECC71") },
-            null,
-            SKShaderTileMode.Clamp);
+        // Right wing (teal)
+        using var tealPaint = new SKPaint { Color = teal, IsAntialias = true, Style = SKPaintStyle.Fill };
+        using var rightWingBuilder = new SKPathBuilder();
+        rightWingBuilder.MoveTo(size * 0.63f, size * 0.14f);
+        rightWingBuilder.LineTo(size * 0.91f, size * 0.14f);
+        rightWingBuilder.LineTo(size * 0.60f, size * 0.91f);
+        rightWingBuilder.LineTo(size * 0.48f, size * 0.62f);
+        rightWingBuilder.Close();
+        using var rightWing = rightWingBuilder.Detach();
+        canvas.DrawPath(rightWing, tealPaint);
 
-        using var vPaint = new SKPaint
-        {
-            Shader = shader,
-            IsAntialias = true,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = size * 0.16f,
-            StrokeCap = SKStrokeCap.Round,
-            StrokeJoin = SKStrokeJoin.Round
-        };
+        // Shadow overlap
+        using var shadowPaint = new SKPaint { Color = shadow, IsAntialias = true, Style = SKPaintStyle.Fill };
+        using var shadowBuilder = new SKPathBuilder();
+        shadowBuilder.MoveTo(size * 0.50f, size * 0.67f);
+        shadowBuilder.LineTo(size * 0.64f, size * 0.91f);
+        shadowBuilder.LineTo(size * 0.35f, size * 0.91f);
+        shadowBuilder.Close();
+        using var shadowPath = shadowBuilder.Detach();
+        canvas.DrawPath(shadowPath, shadowPaint);
 
-        using var vBuilder = new SKPathBuilder();
-        vBuilder.MoveTo(size * 0.22f, size * 0.28f);
-        vBuilder.LineTo(size * 0.50f, size * 0.72f);
-        vBuilder.LineTo(size * 0.78f, size * 0.28f);
-        using var vPath = vBuilder.Detach();
-        canvas.DrawPath(vPath, vPaint);
+        // Left wing (lime)
+        using var limePaint = new SKPaint { Color = lime, IsAntialias = true, Style = SKPaintStyle.Fill };
+        using var leftWingBuilder = new SKPathBuilder();
+        leftWingBuilder.MoveTo(size * 0.08f, size * 0.14f);
+        leftWingBuilder.LineTo(size * 0.36f, size * 0.14f);
+        leftWingBuilder.LineTo(size * 0.64f, size * 0.91f);
+        leftWingBuilder.LineTo(size * 0.35f, size * 0.91f);
+        leftWingBuilder.Close();
+        using var leftWing = leftWingBuilder.Detach();
+        canvas.DrawPath(leftWing, limePaint);
 
         return bitmap;
     }

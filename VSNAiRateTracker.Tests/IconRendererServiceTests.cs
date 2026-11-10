@@ -173,53 +173,32 @@ public class IconRendererServiceTests
         appIconBmp.Width.Should().Be(64);
         appIconBmp.Height.Should().Be(64);
 
+        // Verify non-empty
+        bool hasNonTransparent = false;
+        for (int y = 0; y < 64 && !hasNonTransparent; y++)
+        {
+            for (int x = 0; x < 64; x++)
+            {
+                if (appIconBmp.GetPixel(x, y).Alpha > 10)
+                {
+                    hasNonTransparent = true;
+                    break;
+                }
+            }
+        }
+        hasNonTransparent.Should().BeTrue();
+
         var pngBytes = _sut.RenderAppIconPngBytes(64);
         pngBytes.Length.Should().BeGreaterThan(100);
+        pngBytes[0].Should().Be(0x89);
+        pngBytes[1].Should().Be(0x50); // 'P'
+        pngBytes[2].Should().Be(0x4E); // 'N'
+        pngBytes[3].Should().Be(0x47); // 'G'
 
-        // Also save to Assets directory for application packaging
-        var assetsDir = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "VSNAiRateTracker", "Assets"));
-        if (Directory.Exists(assetsDir))
-        {
-            File.WriteAllBytes(Path.Combine(assetsDir, "icon.png"), pngBytes);
-
-            int[] sizes = [256, 48, 32, 16];
-            var entries = new System.Collections.Generic.List<(int size, byte[] bytes)>();
-            foreach (var s in sizes)
-            {
-                entries.Add((s, _sut.RenderAppIconPngBytes(s)));
-            }
-
-            using var ms = new MemoryStream();
-            using var writer = new BinaryWriter(ms);
-
-            // ICO Header
-            writer.Write((ushort)0); // Reserved
-            writer.Write((ushort)1); // Type 1 = Icon
-            writer.Write((ushort)entries.Count);
-
-            // Directory entries
-            int offset = 6 + (16 * entries.Count);
-            foreach (var (size, bytes) in entries)
-            {
-                writer.Write((byte)(size >= 256 ? 0 : size));
-                writer.Write((byte)(size >= 256 ? 0 : size));
-                writer.Write((byte)0); // Palette
-                writer.Write((byte)0); // Reserved
-                writer.Write((ushort)1); // Planes
-                writer.Write((ushort)32); // Bits per pixel
-                writer.Write((uint)bytes.Length);
-                writer.Write((uint)offset);
-                offset += bytes.Length;
-            }
-
-            // Image data
-            foreach (var (_, bytes) in entries)
-            {
-                writer.Write(bytes);
-            }
-
-            File.WriteAllBytes(Path.Combine(assetsDir, "icon.ico"), ms.ToArray());
-        }
+        using var appIcon256 = _sut.RenderAppIconBitmap(256);
+        appIcon256.Should().NotBeNull();
+        appIcon256.Width.Should().Be(256);
+        appIcon256.Height.Should().Be(256);
     }
 
     [Theory]
