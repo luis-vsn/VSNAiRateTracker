@@ -83,7 +83,7 @@ public class IconRendererServiceTests
 
         // Content must occupy the vast majority of the 64x64 canvas to be clearly visible in Windows tray
         contentWidth.Should().BeGreaterThanOrEqualTo(40); // >= 60% of 64px
-        contentHeight.Should().BeGreaterThanOrEqualTo(20); // >= 30% of 64px
+        contentHeight.Should().BeGreaterThanOrEqualTo(50); // >= 78% of 64px (now maximizes vertical height)
     }
 
     [Theory]
@@ -126,7 +126,7 @@ public class IconRendererServiceTests
         int contentWidth = maxX - minX + 1;
         int contentHeight = maxY - minY + 1;
         contentWidth.Should().BeGreaterThanOrEqualTo(40);
-        contentHeight.Should().BeGreaterThanOrEqualTo(20);
+        contentHeight.Should().BeGreaterThanOrEqualTo(50);
     }
 
     [Fact]
@@ -220,5 +220,82 @@ public class IconRendererServiceTests
 
             File.WriteAllBytes(Path.Combine(assetsDir, "icon.ico"), ms.ToArray());
         }
+    }
+
+    [Fact]
+    public void RenderBadgeIcoBytes_GeneratesValidMultiResolutionIco()
+    {
+        var icoBytes = _sut.RenderBadgeIcoBytes("-0.4", "#2ECC71");
+
+        icoBytes.Should().NotBeNull();
+        icoBytes.Length.Should().BeGreaterThan(1000);
+
+        using var ms = new MemoryStream(icoBytes);
+        using var reader = new BinaryReader(ms);
+
+        // ICO Header
+        ushort reserved = reader.ReadUInt16();
+        ushort type = reader.ReadUInt16();
+        ushort count = reader.ReadUInt16();
+
+        reserved.Should().Be(0);
+        type.Should().Be(1); // 1 = ICO
+        count.Should().Be(6); // 16, 20, 24, 32, 48, 64
+
+        // Check directory entries
+        var sizes = new List<int>();
+        for (int i = 0; i < count; i++)
+        {
+            byte w = reader.ReadByte();
+            byte h = reader.ReadByte();
+            byte colorCount = reader.ReadByte();
+            byte rsvd = reader.ReadByte();
+            ushort planes = reader.ReadUInt16();
+            ushort bitCount = reader.ReadUInt16();
+            uint bytesInRes = reader.ReadUInt32();
+            uint imageOffset = reader.ReadUInt32();
+
+            sizes.Add(w);
+            w.Should().Be(h);
+            planes.Should().Be(1);
+            bitCount.Should().Be(32);
+            bytesInRes.Should().BeGreaterThan(0);
+            imageOffset.Should().BeGreaterThan(0);
+        }
+
+        sizes.Should().Contain([16, 20, 24, 32, 48, 64]);
+    }
+
+    [Theory]
+    [InlineData("...")]
+    [InlineData("ERR")]
+    [InlineData("")]
+    [InlineData("+100")]
+    [InlineData("-120")]
+    public void RenderBadgeBitmap_HandlesSpecialAndNonNumericValuesGracefully(string text)
+    {
+        using var bmp = _sut.RenderBadgeBitmap(text, "#2ECC71", 64);
+        bmp.Should().NotBeNull();
+        bmp.Width.Should().Be(64);
+        bmp.Height.Should().Be(64);
+
+        int minX = 64, maxX = 0, minY = 64, maxY = 0;
+        for (int y = 0; y < 64; y++)
+        {
+            for (int x = 0; x < 64; x++)
+            {
+                if (bmp.GetPixel(x, y).Alpha > 10)
+                {
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+                }
+            }
+        }
+        int contentWidth = maxX - minX + 1;
+        int contentHeight = maxY - minY + 1;
+        contentWidth.Should().BeGreaterThanOrEqualTo(20);
+        contentHeight.Should().BeGreaterThanOrEqualTo(10);
     }
 }
