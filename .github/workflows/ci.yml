@@ -55,7 +55,7 @@ jobs:
         OTEL_EXPORTER_OTLP_ENDPOINT: ${{ secrets.OTEL_EXPORTER_OTLP_ENDPOINT || secrets.TELEMETRY_ENDPOINT }}
         OTEL_EXPORTER_OTLP_HEADERS: ${{ secrets.OTEL_EXPORTER_OTLP_HEADERS || secrets.TELEMETRY_HEADERS }}
       run: |
-        ./packaging/windows/build-installer.ps1 -Version 0.0.1
+        ./packaging/windows/build-installer.ps1 -Version 0.0.2
 
     - name: Upload Windows Installer
       if: matrix.os == 'windows-latest'
@@ -78,8 +78,8 @@ jobs:
         OTEL_EXPORTER_OTLP_HEADERS: ${{ secrets.OTEL_EXPORTER_OTLP_HEADERS || secrets.TELEMETRY_HEADERS }}
       run: |
         chmod +x ./packaging/macos/build-dmg.sh
-        ./packaging/macos/build-dmg.sh Release 0.0.1 osx-arm64
-        ./packaging/macos/build-dmg.sh Release 0.0.1 osx-x64
+        ./packaging/macos/build-dmg.sh Release 0.0.2 osx-arm64
+        ./packaging/macos/build-dmg.sh Release 0.0.2 osx-x64
 
     - name: Upload macOS DMG (Apple Silicon)
       if: matrix.os == 'macos-latest'

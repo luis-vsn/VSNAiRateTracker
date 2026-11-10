@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [string]$Configuration = "Release",
-    [string]$Version = "0.0.1",
+    [string]$Version = "0.0.2",
     [string]$TelemetryEndpoint = "",
     [string]$TelemetryHeaders = "",
     [switch]$SkipInstaller

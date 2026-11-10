@@ -141,9 +141,10 @@ public class TelemetryService : ITelemetryService
                 var logsUri = ResolveSignalEndpoint(endpoint, "v1/logs");
 
                 var machineName = Environment.MachineName;
+                var appVersion = typeof(TelemetryService).Assembly.GetName().Version?.ToString(3) ?? "0.0.2";
 
                 var resourceBuilder = ResourceBuilder.CreateDefault()
-                    .AddService(serviceName, serviceVersion: "0.0.1", serviceInstanceId: machineName)
+                    .AddService(serviceName, serviceVersion: appVersion, serviceInstanceId: machineName)
                     .AddTelemetrySdk();
 
                 const OtlpExportProtocol protocol = OtlpExportProtocol.HttpProtobuf;

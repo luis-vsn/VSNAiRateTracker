@@ -13,7 +13,7 @@
 set -euo pipefail
 
 CONFIGURATION="${1:-Release}"
-VERSION="${2:-0.0.1}"
+VERSION="${2:-0.0.2}"
 RUNTIME="${3:-osx-arm64}"
 
 case "${RUNTIME}" in

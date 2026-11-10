@@ -122,7 +122,7 @@ La aplicación puede emitir trazas, métricas y logs estructurados vía **OTLP H
 Cada métrica, log y traza enviada por la aplicación incluye de forma automática:
 * `instance`: Nombre de la máquina donde se ejecuta la aplicación (`Environment.MachineName`), permitiendo filtrar métricas y dashboards de Grafana/Prometheus directamente por equipo.
 * `service.name`: Nombre del servicio configurado (por defecto `vsn-ai-rate-tracker`).
-* `service.version`: Versión de la aplicación (`0.0.1`).
+* `service.version`: Versión de la aplicación (`0.0.2`).
 
 ### 4. Métricas publicadas
 
@@ -156,8 +156,8 @@ Las métricas `claude_code.*` se calculan leyendo las transcripciones locales de
   * Empaquetado:
 
     ```bash
-    ./packaging/macos/build-dmg.sh Release 0.0.1 osx-arm64   # Apple Silicon
-    ./packaging/macos/build-dmg.sh Release 0.0.1 osx-x64     # Intel
+    ./packaging/macos/build-dmg.sh Release 0.0.2 osx-arm64   # Apple Silicon
+    ./packaging/macos/build-dmg.sh Release 0.0.2 osx-x64     # Intel
     ```
 
     Genera `packaging/dist/<runtime>/VSN AI Rate Tracker.app` y `packaging/dist/VSNAiRateTracker-<versión>-<runtime>.dmg`. Sin `CODESIGN_IDENTITY` la firma es *ad-hoc* (al descargarlo hay que abrirlo con clic derecho → Abrir); con un certificado *Developer ID* se firma con Hardened Runtime y, si se definen `NOTARY_KEYCHAIN_PROFILE` o `APPLE_ID`/`APPLE_TEAM_ID`/`APPLE_APP_PASSWORD`, se notariza. La telemetría se puede preactivar con `OTEL_EXPORTER_OTLP_ENDPOINT` y `OTEL_EXPORTER_OTLP_HEADERS`, igual que en Windows.
