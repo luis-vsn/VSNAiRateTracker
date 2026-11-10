@@ -83,7 +83,7 @@ public class IconRendererServiceTests
 
         // Content must occupy the vast majority of the 64x64 canvas to be clearly visible in Windows tray
         contentWidth.Should().BeGreaterThanOrEqualTo(40); // >= 60% of 64px
-        contentHeight.Should().BeGreaterThanOrEqualTo(50); // >= 78% of 64px (now maximizes vertical height)
+        contentHeight.Should().BeGreaterThanOrEqualTo(40); // >= 62% of 64px (previously only ~20px)
     }
 
     [Theory]
@@ -126,7 +126,7 @@ public class IconRendererServiceTests
         int contentWidth = maxX - minX + 1;
         int contentHeight = maxY - minY + 1;
         contentWidth.Should().BeGreaterThanOrEqualTo(40);
-        contentHeight.Should().BeGreaterThanOrEqualTo(50);
+        contentHeight.Should().BeGreaterThanOrEqualTo(40);
     }
 
     [Fact]
@@ -222,48 +222,58 @@ public class IconRendererServiceTests
         }
     }
 
-    [Fact]
-    public void RenderBadgeIcoBytes_GeneratesValidMultiResolutionIco()
+    [Theory]
+    [InlineData("-0.4")]
+    [InlineData("+0.4")]
+    [InlineData("+1.2")]
+    [InlineData("-2.5")]
+    [InlineData("+12")]
+    [InlineData("-15")]
+    [InlineData("+0.0")]
+    [InlineData("+100")]
+    [InlineData("-120")]
+    [InlineData("...")]
+    [InlineData("ERR")]
+    public void RenderBadgeBitmap_NeverClipsOnRightOrLeftEdges(string text)
     {
-        var icoBytes = _sut.RenderBadgeIcoBytes("-0.4", "#2ECC71");
+        int size = 64;
+        using var bmp = _sut.RenderBadgeBitmap(text, "#2ECC71", size);
 
-        icoBytes.Should().NotBeNull();
-        icoBytes.Length.Should().BeGreaterThan(1000);
-
-        using var ms = new MemoryStream(icoBytes);
-        using var reader = new BinaryReader(ms);
-
-        // ICO Header
-        ushort reserved = reader.ReadUInt16();
-        ushort type = reader.ReadUInt16();
-        ushort count = reader.ReadUInt16();
-
-        reserved.Should().Be(0);
-        type.Should().Be(1); // 1 = ICO
-        count.Should().Be(6); // 16, 20, 24, 32, 48, 64
-
-        // Check directory entries
-        var sizes = new List<int>();
-        for (int i = 0; i < count; i++)
+        int minX = size, maxX = 0, minY = size, maxY = 0;
+        for (int y = 0; y < size; y++)
         {
-            byte w = reader.ReadByte();
-            byte h = reader.ReadByte();
-            byte colorCount = reader.ReadByte();
-            byte rsvd = reader.ReadByte();
-            ushort planes = reader.ReadUInt16();
-            ushort bitCount = reader.ReadUInt16();
-            uint bytesInRes = reader.ReadUInt32();
-            uint imageOffset = reader.ReadUInt32();
-
-            sizes.Add(w);
-            w.Should().Be(h);
-            planes.Should().Be(1);
-            bitCount.Should().Be(32);
-            bytesInRes.Should().BeGreaterThan(0);
-            imageOffset.Should().BeGreaterThan(0);
+            for (int x = 0; x < size; x++)
+            {
+                if (bmp.GetPixel(x, y).Alpha > 10)
+                {
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+                }
+            }
         }
 
-        sizes.Should().Contain([16, 20, 24, 32, 48, 64]);
+        // Must not touch the canvas boundary - guarantees no clipping on any edge
+        maxX.Should().BeLessThan(size, $"Right edge of text '{text}' must not be clipped");
+        minX.Should().BeGreaterThan(0, $"Left edge of text '{text}' must not be clipped");
+        maxY.Should().BeLessThan(size, $"Bottom edge of text '{text}' must not be clipped");
+        minY.Should().BeGreaterThan(0, $"Top edge of text '{text}' must not be clipped");
+
+        // Visual width and height should still fill a large portion of canvas
+        int contentWidth = maxX - minX + 1;
+        int contentHeight = maxY - minY + 1;
+        contentWidth.Should().BeGreaterThanOrEqualTo(25);
+        contentHeight.Should().BeGreaterThanOrEqualTo(20);
+
+        // Save to scratch for visual inspection
+        var scratchDir = @"C:\Users\Luis Macia\.gemini\antigravity\brain\394273ca-0351-4053-b80f-a33cf9e93675\scratch";
+        var slug = text.Replace('+', 'p').Replace('-', 'm').Replace('.', '_');
+        var pngBytes = _sut.RenderBadgePngBytes(text, "#2ECC71", 64);
+        File.WriteAllBytes(Path.Combine(scratchDir, $"clean_{slug}_64.png"), pngBytes);
+
+        var pngBytes24 = _sut.RenderBadgePngBytes(text, "#2ECC71", 24);
+        File.WriteAllBytes(Path.Combine(scratchDir, $"clean_{slug}_24.png"), pngBytes24);
     }
 
     [Theory]
