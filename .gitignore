@@ -487,4 +487,8 @@ packaging/windows/publish/
 defaults.json
 *defaults.json
 telemetry.defaults.json
+defaults.enc
+*defaults.enc
+telemetry.defaults.enc
+temp_defaults.json
 *.secrets.json

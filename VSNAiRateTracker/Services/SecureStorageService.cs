@@ -18,7 +18,7 @@ public class SecureStorageService : ISecureStorageService
     private readonly string _storageDirectory;
     private readonly string _configFilePath;
     private readonly string _keyFilePath;
-    private readonly string _defaultsFilePath;
+    private readonly string? _defaultsFilePath;
     private readonly IKeyProtectionProvider _keyProtectionProvider;
     private readonly byte[] _masterKey;
 
@@ -33,7 +33,7 @@ public class SecureStorageService : ISecureStorageService
 
         _configFilePath = Path.Combine(_storageDirectory, "config.enc");
         _keyFilePath = Path.Combine(_storageDirectory, "master.key");
-        _defaultsFilePath = defaultsFilePath ?? Path.Combine(AppContext.BaseDirectory, "defaults.json");
+        _defaultsFilePath = defaultsFilePath;
         _keyProtectionProvider = keyProtectionProvider ?? new CrossPlatformKeyProtectionProvider();
 
         Directory.CreateDirectory(_storageDirectory);
@@ -194,15 +194,44 @@ public class SecureStorageService : ISecureStorageService
             return;
         }
 
-        // Look for bundled defaults.json next to the executable or custom path
-        if (!File.Exists(_defaultsFilePath))
+        string? resolvedPath = null;
+        if (!string.IsNullOrWhiteSpace(_defaultsFilePath) && File.Exists(_defaultsFilePath))
+        {
+            resolvedPath = _defaultsFilePath;
+        }
+        else if (string.IsNullOrWhiteSpace(_defaultsFilePath))
+        {
+            var encPath = Path.Combine(AppContext.BaseDirectory, BundledDefaultsCrypto.EncryptedFileName);
+            var jsonPath = Path.Combine(AppContext.BaseDirectory, BundledDefaultsCrypto.PlaintextFileName);
+            if (File.Exists(encPath))
+            {
+                resolvedPath = encPath;
+            }
+            else if (File.Exists(jsonPath))
+            {
+                resolvedPath = jsonPath;
+            }
+        }
+
+        if (resolvedPath == null || !File.Exists(resolvedPath))
         {
             return;
         }
 
         try
         {
-            var json = File.ReadAllText(_defaultsFilePath);
+            var bytes = File.ReadAllBytes(resolvedPath);
+            string json;
+            if (resolvedPath.EndsWith(".enc", StringComparison.OrdinalIgnoreCase) ||
+                (bytes.Length >= 29 && bytes[0] == 0x01 && !IsJsonStart(bytes)))
+            {
+                json = BundledDefaultsCrypto.Decrypt(bytes);
+            }
+            else
+            {
+                json = System.Text.Encoding.UTF8.GetString(bytes);
+            }
+
             using var doc = JsonDocument.Parse(json);
             if (doc.RootElement.TryGetProperty("Telemetry", out var telProp) && telProp.ValueKind == JsonValueKind.Object)
             {
@@ -234,6 +263,19 @@ public class SecureStorageService : ISecureStorageService
         {
             // Silently ignore corrupted or unreadable defaults
         }
+    }
+
+    private static bool IsJsonStart(byte[] bytes)
+    {
+        foreach (var b in bytes)
+        {
+            if (b is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n')
+            {
+                continue;
+            }
+            return b is (byte)'{' or (byte)'[';
+        }
+        return false;
     }
 
     private static void ApplyUnixSecurePermissions(string path)

@@ -232,5 +232,94 @@ public class SecureStorageServiceTests : IDisposable
         loaded.Telemetry.Endpoint.Should().Be("https://custom-user-endpoint.example.com");
         loaded.Telemetry.Headers.Should().Be("UserAuth");
     }
+
+    [Fact]
+    public void BundledDefaultsCrypto_EncryptAndDecrypt_RoundTripPreservesContent()
+    {
+        // Arrange
+        var sampleJson = """{"Telemetry":{"Enabled":true,"Endpoint":"https://otlp.example.com","Headers":"Auth=Secret"}}""";
+
+        // Act
+        var encrypted = BundledDefaultsCrypto.Encrypt(sampleJson);
+        var decrypted = BundledDefaultsCrypto.Decrypt(encrypted);
+
+        // Assert
+        encrypted.Should().NotBeNull();
+        encrypted.Length.Should().BeGreaterThan(29);
+        decrypted.Should().Be(sampleJson);
+    }
+
+    [Fact]
+    public void BundledDefaultsCrypto_Decrypt_WhenCiphertextTampered_ThrowsCryptographicException()
+    {
+        // Arrange
+        var sampleJson = """{"Telemetry":{"Enabled":true}}""";
+        var encrypted = BundledDefaultsCrypto.Encrypt(sampleJson);
+
+        // Tamper with ciphertext byte
+        encrypted[^1] ^= 0x55;
+
+        // Act & Assert
+        Action act = () => BundledDefaultsCrypto.Decrypt(encrypted);
+        act.Should().Throw<CryptographicException>();
+    }
+
+    [Fact]
+    public void BundledDefaultsCrypto_Decrypt_WhenPayloadTooShort_ThrowsCryptographicException()
+    {
+        // Arrange
+        var truncated = new byte[15];
+
+        // Act & Assert
+        Action act = () => BundledDefaultsCrypto.Decrypt(truncated);
+        act.Should().Throw<CryptographicException>();
+    }
+
+    [Fact]
+    public void BundledDefaultsCrypto_Decrypt_WhenVersionMismatch_ThrowsCryptographicException()
+    {
+        // Arrange
+        var sampleJson = """{"Telemetry":{"Enabled":true}}""";
+        var encrypted = BundledDefaultsCrypto.Encrypt(sampleJson);
+        encrypted[0] = 0x99; // Invalid version
+
+        // Act & Assert
+        Action act = () => BundledDefaultsCrypto.Decrypt(encrypted);
+        act.Should().Throw<CryptographicException>();
+    }
+
+    [Fact]
+    public async Task LoadConfig_WithEncryptedBundledDefaults_DecryptsAndAppliesTelemetryDefaults()
+    {
+        // Arrange
+        var defaultsEncFile = Path.Combine(_tempDirectory, "test-defaults.enc");
+        var defaultsJson = """
+        {
+          "Telemetry": {
+            "Enabled": true,
+            "Endpoint": "https://encrypted-gateway.vsn.tv/otlp",
+            "Headers": "Authorization=Bearer enc-token-secret-12345",
+            "ServiceName": "vsn-ai-rate-tracker",
+            "Protocol": "HttpProtobuf"
+          }
+        }
+        """;
+        var encryptedBytes = BundledDefaultsCrypto.Encrypt(defaultsJson);
+        await File.WriteAllBytesAsync(defaultsEncFile, encryptedBytes);
+
+        var service = new SecureStorageService(_tempDirectory, _keyProtection, defaultsFilePath: defaultsEncFile);
+
+        // Act
+        var config = await service.LoadConfigAsync();
+
+        // Assert
+        config.Should().NotBeNull();
+        config.Telemetry.Should().NotBeNull();
+        config.Telemetry.Enabled.Should().BeTrue();
+        config.Telemetry.Endpoint.Should().Be("https://encrypted-gateway.vsn.tv/otlp");
+        config.Telemetry.Headers.Should().Be("Authorization=Bearer enc-token-secret-12345");
+        config.Telemetry.ServiceName.Should().Be("vsn-ai-rate-tracker");
+        config.Telemetry.Protocol.Should().Be("HttpProtobuf");
+    }
 }
 

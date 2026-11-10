@@ -51,6 +51,9 @@ jobs:
     - name: Build Windows Installer & Portable Package
       if: matrix.os == 'windows-latest'
       shell: pwsh
+      env:
+        OTEL_EXPORTER_OTLP_ENDPOINT: ${{ secrets.OTEL_EXPORTER_OTLP_ENDPOINT || secrets.TELEMETRY_ENDPOINT }}
+        OTEL_EXPORTER_OTLP_HEADERS: ${{ secrets.OTEL_EXPORTER_OTLP_HEADERS || secrets.TELEMETRY_HEADERS }}
       run: |
         ./packaging/windows/build-installer.ps1 -Version 0.0.1
 
@@ -70,6 +73,9 @@ jobs:
 
     - name: Build macOS DMGs (Apple Silicon & Intel)
       if: matrix.os == 'macos-latest'
+      env:
+        OTEL_EXPORTER_OTLP_ENDPOINT: ${{ secrets.OTEL_EXPORTER_OTLP_ENDPOINT || secrets.TELEMETRY_ENDPOINT }}
+        OTEL_EXPORTER_OTLP_HEADERS: ${{ secrets.OTEL_EXPORTER_OTLP_HEADERS || secrets.TELEMETRY_HEADERS }}
       run: |
         chmod +x ./packaging/macos/build-dmg.sh
         ./packaging/macos/build-dmg.sh Release 0.0.1 osx-arm64

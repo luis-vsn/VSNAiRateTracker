@@ -9,8 +9,25 @@ class Program
     // SynchronizationContext-reliant code before AppMain is called: things aren't initialized
     // yet and stuff might break.
     [STAThread]
-    public static void Main(string[] args) => BuildAvaloniaApp()
-        .StartWithClassicDesktopLifetime(args);
+    public static int Main(string[] args)
+    {
+        if (args is ["--encrypt-defaults", string inputPath, string outputPath])
+        {
+            try
+            {
+                VSNAiRateTracker.Services.BundledDefaultsCrypto.EncryptFile(inputPath, outputPath);
+                Console.WriteLine($"Successfully encrypted defaults to: {outputPath}");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Failed to encrypt defaults: {ex.Message}");
+                return 1;
+            }
+        }
+
+        return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+    }
 
     // Avalonia configuration, don't remove; also used by visual designer.
     public static AppBuilder BuildAvaloniaApp()

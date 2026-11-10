@@ -65,19 +65,25 @@ plutil -replace CFBundleShortVersionString -string "${VERSION}" "${APP_BUNDLE}/C
 plutil -replace CFBundleVersion -string "${VERSION}" "${APP_BUNDLE}/Contents/Info.plist"
 plutil -lint "${APP_BUNDLE}/Contents/Info.plist" >/dev/null
 
-# Bundled telemetry defaults (same mechanism as the Windows installer): pre-activate telemetry
-# when both OTEL_EXPORTER_OTLP_ENDPOINT and OTEL_EXPORTER_OTLP_HEADERS are provided
-if [ -n "${OTEL_EXPORTER_OTLP_ENDPOINT:-}" ] && [ -n "${OTEL_EXPORTER_OTLP_HEADERS:-}" ]; then
+# Bundled telemetry defaults (encrypted defaults.enc): pre-activate telemetry
+# when both endpoint and headers are provided (via OTEL_EXPORTER_OTLP_* or TELEMETRY_*)
+TEL_ENDPOINT="${OTEL_EXPORTER_OTLP_ENDPOINT:-${TELEMETRY_ENDPOINT:-}}"
+TEL_HEADERS="${OTEL_EXPORTER_OTLP_HEADERS:-${TELEMETRY_HEADERS:-}}"
+if [ -n "${TEL_ENDPOINT}" ] && [ -n "${TEL_HEADERS}" ]; then
     DEFAULTS_PLIST="${WORK_DIR}/defaults.plist"
+    DEFAULTS_TEMP_JSON="${WORK_DIR}/temp_defaults.json"
+    DEFAULTS_ENC="${APP_BUNDLE}/Contents/MacOS/defaults.enc"
     plutil -create xml1 "${DEFAULTS_PLIST}"
     plutil -insert Telemetry -dictionary "${DEFAULTS_PLIST}"
     plutil -insert Telemetry.Enabled -bool YES "${DEFAULTS_PLIST}"
-    plutil -insert Telemetry.Endpoint -string "${OTEL_EXPORTER_OTLP_ENDPOINT}" "${DEFAULTS_PLIST}"
-    plutil -insert Telemetry.Headers -string "${OTEL_EXPORTER_OTLP_HEADERS}" "${DEFAULTS_PLIST}"
+    plutil -insert Telemetry.Endpoint -string "${TEL_ENDPOINT}" "${DEFAULTS_PLIST}"
+    plutil -insert Telemetry.Headers -string "${TEL_HEADERS}" "${DEFAULTS_PLIST}"
     plutil -insert Telemetry.ServiceName -string "vsn-ai-rate-tracker" "${DEFAULTS_PLIST}"
     plutil -insert Telemetry.Protocol -string "HttpProtobuf" "${DEFAULTS_PLIST}"
-    plutil -convert json "${DEFAULTS_PLIST}" -o "${APP_BUNDLE}/Contents/MacOS/defaults.json"
-    echo "    Injected bundled telemetry defaults (telemetry pre-activated)."
+    plutil -convert json "${DEFAULTS_PLIST}" -o "${DEFAULTS_TEMP_JSON}"
+    "${APP_BUNDLE}/Contents/MacOS/VSNAiRateTracker" --encrypt-defaults "${DEFAULTS_TEMP_JSON}" "${DEFAULTS_ENC}"
+    rm -f "${DEFAULTS_TEMP_JSON}" "${APP_BUNDLE}/Contents/MacOS/defaults.json"
+    echo "    Injected encrypted bundled telemetry defaults (defaults.enc)."
 fi
 
 # 3. App icon (.icns) generated from the app's icon asset. Only sizes up to the source

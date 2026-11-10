@@ -112,8 +112,14 @@ if ([string]::IsNullOrWhiteSpace($endpoint) -or [string]::IsNullOrWhiteSpace($he
 if ([string]::IsNullOrWhiteSpace($endpoint)) {
     $endpoint = [System.Environment]::GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT")
 }
+if ([string]::IsNullOrWhiteSpace($endpoint)) {
+    $endpoint = [System.Environment]::GetEnvironmentVariable("TELEMETRY_ENDPOINT")
+}
 if ([string]::IsNullOrWhiteSpace($headers)) {
     $headers = [System.Environment]::GetEnvironmentVariable("OTEL_EXPORTER_OTLP_HEADERS")
+}
+if ([string]::IsNullOrWhiteSpace($headers)) {
+    $headers = [System.Environment]::GetEnvironmentVariable("TELEMETRY_HEADERS")
 }
 
 if (-not [string]::IsNullOrWhiteSpace($endpoint) -and -not [string]::IsNullOrWhiteSpace($headers)) {
@@ -127,9 +133,55 @@ if (-not [string]::IsNullOrWhiteSpace($endpoint) -and -not [string]::IsNullOrWhi
         }
     }
     $defaultsJson = $defaultsObj | ConvertTo-Json -Depth 5
-    $defaultsFile = Join-Path $publishDir "defaults.json"
-    [System.IO.File]::WriteAllText($defaultsFile, $defaultsJson, [System.Text.Encoding]::UTF8)
-    Write-Host "Injected bundled telemetry defaults into installer package (telemetry pre-activated)." -ForegroundColor Green
+    $defaultsEncFile = Join-Path $publishDir "defaults.enc"
+    $plainDefaultsFile = Join-Path $publishDir "defaults.json"
+    if (Test-Path $plainDefaultsFile) { Remove-Item $plainDefaultsFile -Force }
+
+    $hasAesGcm = $false
+    try { [void][System.Security.Cryptography.AesGcm]; $hasAesGcm = $true } catch { }
+
+    if ($hasAesGcm) {
+        $derivedKey = [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes("VSNAiRateTracker-Bundled-Defaults-AES256-GCM-v1"))
+        $nonce = [byte[]]::new(12)
+        [System.Security.Cryptography.RandomNumberGenerator]::Fill($nonce)
+        $plainBytes = [System.Text.Encoding]::UTF8.GetBytes($defaultsJson)
+        $cipher = [byte[]]::new($plainBytes.Length)
+        $tag = [byte[]]::new(16)
+        $aes = [System.Security.Cryptography.AesGcm]::new($derivedKey, 16)
+        $aes.Encrypt($nonce, $plainBytes, $cipher, $tag)
+
+        $payload = [byte[]]::new(1 + 12 + 16 + $cipher.Length)
+        $payload[0] = 0x01
+        [Array]::Copy($nonce, 0, $payload, 1, 12)
+        [Array]::Copy($tag, 0, $payload, 13, 16)
+        [Array]::Copy($cipher, 0, $payload, 29, $cipher.Length)
+        [System.IO.File]::WriteAllBytes($defaultsEncFile, $payload)
+    } else {
+        # Fallback for Windows PowerShell 5.1: invoke pwsh if available
+        $pwshExe = (Get-Command pwsh -ErrorAction SilentlyContinue)?.Source
+        if ($pwshExe) {
+            $tempJson = Join-Path $scriptDir "temp_defaults.json"
+            [System.IO.File]::WriteAllText($tempJson, $defaultsJson, [System.Text.Encoding]::UTF8)
+            & $pwshExe -NoProfile -Command "
+                `$derivedKey = [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes('VSNAiRateTracker-Bundled-Defaults-AES256-GCM-v1'))
+                `$nonce = [byte[]]::new(12)
+                [System.Security.Cryptography.RandomNumberGenerator]::Fill(`$nonce)
+                `$plainBytes = [System.IO.File]::ReadAllBytes('$tempJson')
+                `$cipher = [byte[]]::new(`$plainBytes.Length)
+                `$tag = [byte[]]::new(16)
+                `$aes = [System.Security.Cryptography.AesGcm]::new(`$derivedKey, 16)
+                `$aes.Encrypt(`$nonce, `$plainBytes, `$cipher, `$tag)
+                `$payload = [byte[]]::new(1 + 12 + 16 + `$cipher.Length)
+                `$payload[0] = 0x01
+                [Array]::Copy(`$nonce, 0, `$payload, 1, 12)
+                [Array]::Copy(`$tag, 0, `$payload, 13, 16)
+                [Array]::Copy(`$cipher, 0, `$payload, 29, `$cipher.Length)
+                [System.IO.File]::WriteAllBytes('$defaultsEncFile', `$payload)
+            "
+            if (Test-Path $tempJson) { Remove-Item $tempJson -Force }
+        }
+    }
+    Write-Host "Injected encrypted bundled telemetry defaults ($defaultsEncFile) into installer package." -ForegroundColor Green
 }
 
 # 3. Create Portable ZIP
