@@ -29,6 +29,10 @@ public class AnthropicAuthService : IAnthropicAuthService
     private readonly Func<string, Task>? _browserLauncher;
     private readonly Func<int, string, CancellationToken, Task<(string code, string state)>>? _codeReceiver;
     private readonly Action? _cliLauncher;
+    private readonly Func<CancellationToken, Task<string?>> _claudeCredentialsReader;
+
+    /// <summary>Keychain service name under which Claude Code stores its OAuth session on macOS.</summary>
+    public const string ClaudeCodeKeychainService = "Claude Code-credentials";
 
     public AnthropicAuthService(
         HttpClient httpClient,
@@ -38,7 +42,8 @@ public class AnthropicAuthService : IAnthropicAuthService
         string? scope = null,
         Func<string, Task>? browserLauncher = null,
         Func<int, string, CancellationToken, Task<(string code, string state)>>? codeReceiver = null,
-        Action? cliLauncher = null)
+        Action? cliLauncher = null,
+        Func<CancellationToken, Task<string?>>? claudeCredentialsReader = null)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _clientId = clientId ?? DefaultClientId;
@@ -48,6 +53,7 @@ public class AnthropicAuthService : IAnthropicAuthService
         _browserLauncher = browserLauncher;
         _codeReceiver = codeReceiver;
         _cliLauncher = cliLauncher;
+        _claudeCredentialsReader = claudeCredentialsReader ?? ReadClaudeCodeCredentialsJsonAsync;
     }
 
     public async Task<OAuthTokens> StartInteractiveLoginAsync(CancellationToken cancellationToken = default)
@@ -118,12 +124,18 @@ public class AnthropicAuthService : IAnthropicAuthService
         }
         else if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.OSX))
         {
-            Process.Start(new ProcessStartInfo
+            // `open -a Terminal --args ...` does not run a command; ask Terminal to run it via AppleScript
+            var command = $"{QuoteForShell(claudeCmd)} auth login";
+            var psi = new ProcessStartInfo
             {
-                FileName = "open",
-                Arguments = $"-a Terminal -n --args {claudeCmd} auth login",
-                UseShellExecute = true
-            });
+                FileName = "/usr/bin/osascript",
+                UseShellExecute = false
+            };
+            psi.ArgumentList.Add("-e");
+            psi.ArgumentList.Add($"tell application \"Terminal\" to do script \"{EscapeForAppleScript(command)}\"");
+            psi.ArgumentList.Add("-e");
+            psi.ArgumentList.Add("tell application \"Terminal\" to activate");
+            Process.Start(psi);
         }
         else
         {
@@ -154,9 +166,35 @@ public class AnthropicAuthService : IAnthropicAuthService
                 return npmCmd;
             }
         }
+        else
+        {
+            // Apps launched from Finder/launchd do not inherit the user's shell PATH,
+            // so probe the usual install locations of the claude CLI explicitly.
+            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            string[] candidates =
+            [
+                Path.Combine(userProfile, ".local", "bin", "claude"),
+                Path.Combine(userProfile, ".claude", "local", "claude"),
+                "/opt/homebrew/bin/claude",
+                "/usr/local/bin/claude"
+            ];
+            foreach (var candidate in candidates)
+            {
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+        }
 
         return "claude";
     }
+
+    private static string QuoteForShell(string value) =>
+        "'" + value.Replace("'", "'\\''") + "'";
+
+    private static string EscapeForAppleScript(string value) =>
+        value.Replace("\\", "\\\\").Replace("\"", "\\\"");
 
     public async Task<OAuthTokens?> RefreshTokensAsync(OAuthTokens currentTokens, CancellationToken cancellationToken = default)
     {
@@ -216,19 +254,91 @@ public class AnthropicAuthService : IAnthropicAuthService
         }
     }
 
+    /// <summary>
+    /// Reads the raw Claude Code session JSON: ~/.claude/.credentials.json (Windows/Linux) or,
+    /// on macOS where Claude Code keeps it in the login Keychain, the "Claude Code-credentials" item.
+    /// </summary>
+    private static async Task<string?> ReadClaudeCodeCredentialsJsonAsync(CancellationToken cancellationToken)
+    {
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var credentialsPath = Path.Combine(userProfile, ".claude", ".credentials.json");
+
+        if (File.Exists(credentialsPath))
+        {
+            return await File.ReadAllTextAsync(credentialsPath, cancellationToken);
+        }
+
+        if (OperatingSystem.IsMacOS())
+        {
+            // Claude Code writes the item through /usr/bin/security, so its ACL trusts that tool:
+            // reading it the same way avoids a Keychain access prompt for this app.
+            return await ReadMacKeychainPasswordAsync(ClaudeCodeKeychainService, Environment.UserName, cancellationToken)
+                ?? await ReadMacKeychainPasswordAsync(ClaudeCodeKeychainService, null, cancellationToken);
+        }
+
+        return null;
+    }
+
+    private static async Task<string?> ReadMacKeychainPasswordAsync(string service, string? account, CancellationToken cancellationToken)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = "/usr/bin/security",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        psi.ArgumentList.Add("find-generic-password");
+        psi.ArgumentList.Add("-s");
+        psi.ArgumentList.Add(service);
+        if (!string.IsNullOrWhiteSpace(account))
+        {
+            psi.ArgumentList.Add("-a");
+            psi.ArgumentList.Add(account);
+        }
+        psi.ArgumentList.Add("-w");
+
+        using var process = Process.Start(psi);
+        if (process == null)
+        {
+            return null;
+        }
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(30));
+
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
+        _ = process.StandardError.ReadToEndAsync(timeout.Token);
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            try { process.Kill(); } catch { /* already exited */ }
+            throw;
+        }
+
+        if (process.ExitCode != 0)
+        {
+            return null;
+        }
+
+        var output = (await stdoutTask).Trim();
+        return output.Length == 0 ? null : output;
+    }
+
     public async Task<OAuthTokens?> TryImportFromClaudeCliAsync(CancellationToken cancellationToken = default)
     {
         try
         {
-            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            var credentialsPath = Path.Combine(userProfile, ".claude", ".credentials.json");
-
-            if (!File.Exists(credentialsPath))
+            var json = await _claudeCredentialsReader(cancellationToken);
+            if (string.IsNullOrWhiteSpace(json))
             {
                 return null;
             }
 
-            var json = await File.ReadAllTextAsync(credentialsPath, cancellationToken);
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 

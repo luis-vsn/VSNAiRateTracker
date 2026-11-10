@@ -16,6 +16,9 @@ class Program
     public static AppBuilder BuildAvaloniaApp()
         => AppBuilder.Configure<App>()
             .UsePlatformDetect()
+            // macOS: Menu Bar-only app. Info.plist LSUIElement covers the .app bundle; this also
+            // hides the Dock icon when running unbundled (dotnet run / raw publish output).
+            .With(new MacOSPlatformOptions { ShowInDock = false })
 #if DEBUG
             .WithDeveloperTools()
 #endif

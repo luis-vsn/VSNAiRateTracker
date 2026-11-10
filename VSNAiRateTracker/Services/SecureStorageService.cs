@@ -50,6 +50,10 @@ public class SecureStorageService : ISecureStorageService
                 var unprotectedKey = _keyProtectionProvider.UnprotectKey(protectedKey);
                 if (unprotectedKey.Length == KeySize)
                 {
+                    if (_keyProtectionProvider.NeedsReprotection(protectedKey))
+                    {
+                        TryReprotectMasterKey(unprotectedKey);
+                    }
                     return unprotectedKey;
                 }
             }
@@ -64,6 +68,22 @@ public class SecureStorageService : ISecureStorageService
         File.WriteAllBytes(_keyFilePath, newlyProtectedKey);
         ApplyUnixSecurePermissions(_keyFilePath);
         return newKey;
+    }
+
+    private void TryReprotectMasterKey(byte[] masterKey)
+    {
+        try
+        {
+            var reprotected = _keyProtectionProvider.ProtectKey(masterKey);
+            var tempPath = _keyFilePath + ".tmp";
+            File.WriteAllBytes(tempPath, reprotected);
+            ApplyUnixSecurePermissions(tempPath);
+            File.Move(tempPath, _keyFilePath, overwrite: true);
+        }
+        catch
+        {
+            // Keep the legacy-protected key; the upgrade is retried on the next start
+        }
     }
 
     public byte[] EncryptData(byte[] plaintext)
