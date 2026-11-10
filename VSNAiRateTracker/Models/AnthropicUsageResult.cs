@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace VSNAiRateTracker.Models;
 
@@ -29,6 +30,12 @@ public class AnthropicUsageResult
     public double? SpendLimitAmount { get; set; }
     public double? SpendPercent { get; set; }
     public string? Currency { get; set; }
+
+    /// <summary>
+    /// Every rate-limit window returned by the usage endpoint, keyed by its API name
+    /// (five_hour, seven_day, seven_day_opus, seven_day_sonnet, extra_usage and any window added in the future).
+    /// </summary>
+    public IReadOnlyList<UsageLimitWindow> Limits { get; set; } = Array.Empty<UsageLimitWindow>();
 
     public static AnthropicUsageResult Success(
         double percentConsumed,

@@ -49,6 +49,12 @@ public class TelemetryService : ITelemetryService
     private double _lastExtraUsageUsedCredits;
     private double _lastSpendUsedAmount;
     private double _lastSpendPercent;
+    private double _lastExtraUsageMonthlyLimit;
+    private double _lastSpendLimitAmount;
+
+    // Snapshots read by the multi-dimensional gauges (replaced atomically on every sync)
+    private volatile IReadOnlyList<UsageLimitWindow> _lastLimits = Array.Empty<UsageLimitWindow>();
+    private volatile ClaudeCodeLocalStats? _lastClaudeCodeStats;
 
     private bool _isEnabled;
     private bool _isDisposed;
@@ -86,6 +92,18 @@ public class TelemetryService : ITelemetryService
         _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.extra_usage_used_credits", () => _lastExtraUsageUsedCredits, description: "Extra usage credits used");
         _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.spend_used_amount", () => _lastSpendUsedAmount, description: "Spend budget amount used");
         _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.spend_percent", () => _lastSpendPercent, "%", "Spend budget percentage used");
+        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.extra_usage_monthly_limit", () => _lastExtraUsageMonthlyLimit, description: "Extra usage monthly credit limit");
+        _meter.CreateObservableGauge("vsn.rate_tracker.anthropic.spend_limit_amount", () => _lastSpendLimitAmount, description: "Spend budget limit amount");
+
+        // Every limit window of the account (Usage tab), one series per window: limit="five_hour" | "seven_day" | "seven_day_opus" | ...
+        _meter.CreateObservableGauge<double>("vsn.rate_tracker.anthropic.limit.utilization_percent", ObserveLimitUtilization, "%", "Utilization percent of each Anthropic rate-limit window");
+        _meter.CreateObservableGauge<double>("vsn.rate_tracker.anthropic.limit.resets_in_hours", ObserveLimitResets, "hours", "Hours remaining until each Anthropic rate-limit window resets");
+
+        // Local Claude Code activity (what /usage and /context show), read from ~/.claude/projects transcripts
+        _meter.CreateObservableGauge<long>("vsn.rate_tracker.claude_code.tokens_today", ObserveClaudeCodeTokens, "tokens", "Claude Code tokens used today on this machine, by model and token type");
+        _meter.CreateObservableGauge<long>("vsn.rate_tracker.claude_code.messages_today", ObserveClaudeCodeMessages, description: "Claude Code API responses received today on this machine, by model");
+        _meter.CreateObservableGauge<long>("vsn.rate_tracker.claude_code.sessions_today", ObserveClaudeCodeSessions, description: "Claude Code sessions with activity today on this machine");
+        _meter.CreateObservableGauge<long>("vsn.rate_tracker.claude_code.context_tokens", ObserveClaudeCodeContext, "tokens", "Context window tokens in use by the most recently active Claude Code session");
     }
 
     public void Initialize(TelemetryConfig config)
@@ -261,6 +279,75 @@ public class TelemetryService : ITelemetryService
         }
     }
 
+    private IEnumerable<Measurement<double>> ObserveLimitUtilization()
+    {
+        foreach (var window in _lastLimits)
+        {
+            yield return new Measurement<double>(window.UtilizationPercent, new KeyValuePair<string, object?>("limit", window.Name));
+        }
+    }
+
+    private IEnumerable<Measurement<double>> ObserveLimitResets()
+    {
+        var now = DateTimeOffset.UtcNow;
+        foreach (var window in _lastLimits)
+        {
+            if (!window.ResetsAt.HasValue) continue;
+            var hours = Math.Max(0, (window.ResetsAt.Value - now).TotalHours);
+            yield return new Measurement<double>(hours, new KeyValuePair<string, object?>("limit", window.Name));
+        }
+    }
+
+    private IEnumerable<Measurement<long>> ObserveClaudeCodeTokens()
+    {
+        var stats = _lastClaudeCodeStats;
+        if (stats == null) yield break;
+
+        foreach (var model in stats.Models)
+        {
+            yield return TokenMeasurement(model.InputTokens, model.Model, "input");
+            yield return TokenMeasurement(model.OutputTokens, model.Model, "output");
+            yield return TokenMeasurement(model.CacheReadTokens, model.Model, "cache_read");
+            yield return TokenMeasurement(model.CacheCreationTokens, model.Model, "cache_creation");
+        }
+    }
+
+    private static Measurement<long> TokenMeasurement(long value, string model, string type) =>
+        new(value, new KeyValuePair<string, object?>("model", model), new KeyValuePair<string, object?>("type", type));
+
+    private IEnumerable<Measurement<long>> ObserveClaudeCodeMessages()
+    {
+        var stats = _lastClaudeCodeStats;
+        if (stats == null) yield break;
+
+        foreach (var model in stats.Models)
+        {
+            yield return new Measurement<long>(model.Messages, new KeyValuePair<string, object?>("model", model.Model));
+        }
+    }
+
+    private IEnumerable<Measurement<long>> ObserveClaudeCodeSessions()
+    {
+        var stats = _lastClaudeCodeStats;
+        if (stats == null) yield break;
+
+        yield return new Measurement<long>(stats.SessionsToday);
+    }
+
+    private IEnumerable<Measurement<long>> ObserveClaudeCodeContext()
+    {
+        var stats = _lastClaudeCodeStats;
+        if (stats?.ContextTokens == null) yield break;
+
+        yield return new Measurement<long>(stats.ContextTokens.Value, new KeyValuePair<string, object?>("model", stats.ContextModel ?? "unknown"));
+    }
+
+    public void RecordClaudeCodeStats(ClaudeCodeLocalStats stats)
+    {
+        ArgumentNullException.ThrowIfNull(stats);
+        _lastClaudeCodeStats = stats;
+    }
+
     public void RecordUsageSync(AnthropicUsageResult usageResult, UsageState usageState, long durationMs)
     {
         ArgumentNullException.ThrowIfNull(usageResult);
@@ -292,6 +379,9 @@ public class TelemetryService : ITelemetryService
         _lastExtraUsageUsedCredits = usageResult.ExtraUsageUsedCredits ?? 0.0;
         _lastSpendUsedAmount = usageResult.SpendUsedAmount ?? 0.0;
         _lastSpendPercent = usageResult.SpendPercent ?? 0.0;
+        _lastExtraUsageMonthlyLimit = usageResult.ExtraUsageMonthlyLimit ?? 0.0;
+        _lastSpendLimitAmount = usageResult.SpendLimitAmount ?? 0.0;
+        _lastLimits = usageResult.Limits ?? Array.Empty<UsageLimitWindow>();
 
         _syncCounter.Add(1, new KeyValuePair<string, object?>("status", usageState.Status.ToString()));
         _syncDuration.Record(durationMs, new KeyValuePair<string, object?>("status", usageState.Status.ToString()));

@@ -19,6 +19,13 @@ public interface IIconRendererService
     byte[] RenderAlertPngBytes(bool isCritical = false, int size = 64);
     WindowIcon RenderAlertWindowIcon(bool isCritical = false, int size = 64);
 
+    // Tray-specific icons: multi-resolution .ico on Windows (one natively rendered frame per DPI scale)
+    byte[] RenderBadgeIcoBytes(string text, string? colorHex = null);
+    byte[] RenderAlertIcoBytes(bool isCritical = false);
+    WindowIcon RenderTrayBadgeIcon(string text, string? colorHex = null);
+    WindowIcon RenderTrayBadgeIcon(double deltaHours, string text);
+    WindowIcon RenderTrayAlertIcon(bool isCritical = false);
+
     SKBitmap RenderAppIconBitmap(int size = 64);
     byte[] RenderAppIconPngBytes(int size = 64);
     WindowIcon RenderAppIconWindowIcon(int size = 64);
@@ -143,6 +150,142 @@ public class IconRendererService : IIconRendererService
         canvas.DrawText(displayText, originX, originY, SKTextAlign.Left, font, fillPaint);
 
         return bitmap;
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Tray icons
+    //
+    // Avalonia's Win32 backend asks the icon for its "small" variant at 16 px x taskbar DPI scale. Given
+    // a single PNG it rescales that bitmap (64 -> 16 px), which is what blurred the figure. Given an ICO
+    // it picks the frame of the matching size, so we ship one frame per common DPI scale, each rendered
+    // natively on its own pixel grid.
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>Frame sizes for 100/125/150/175/200/250/300/400 % scaling.</summary>
+    public static readonly int[] TrayIconSizes = { 16, 20, 24, 28, 32, 40, 48, 64 };
+
+    public byte[] RenderBadgeIcoBytes(string text, string? colorHex = null) =>
+        BuildIco(size => RenderBadgeBitmap(text, colorHex, size));
+
+    public byte[] RenderAlertIcoBytes(bool isCritical = false) =>
+        BuildIco(size => RenderAlertBitmap(isCritical, size));
+
+    public WindowIcon RenderTrayBadgeIcon(string text, string? colorHex = null)
+    {
+        var bytes = OperatingSystem.IsWindows()
+            ? RenderBadgeIcoBytes(text, colorHex)
+            : RenderBadgePngBytes(text, colorHex, 64);
+        using var stream = new MemoryStream(bytes);
+        return new WindowIcon(stream);
+    }
+
+    public WindowIcon RenderTrayBadgeIcon(double deltaHours, string text) =>
+        RenderTrayBadgeIcon(text, GetStatusColor(deltaHours).ToString());
+
+    public WindowIcon RenderTrayAlertIcon(bool isCritical = false)
+    {
+        var bytes = OperatingSystem.IsWindows()
+            ? RenderAlertIcoBytes(isCritical)
+            : RenderAlertPngBytes(isCritical, 64);
+        using var stream = new MemoryStream(bytes);
+        return new WindowIcon(stream);
+    }
+
+    /// <summary>
+    /// Builds a multi-resolution .ico with classic 32-bit DIB frames (XOR bitmap + 1-bit AND mask).
+    /// </summary>
+    private static byte[] BuildIco(Func<int, SKBitmap> renderFrame)
+    {
+        var frames = new byte[TrayIconSizes.Length][];
+        for (int i = 0; i < TrayIconSizes.Length; i++)
+        {
+            using var bitmap = renderFrame(TrayIconSizes[i]);
+            frames[i] = EncodeIcoFrame(bitmap);
+        }
+
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream);
+
+        writer.Write((ushort)0);                 // reserved
+        writer.Write((ushort)1);                 // type: icon
+        writer.Write((ushort)frames.Length);
+
+        int offset = 6 + (16 * frames.Length);
+        for (int i = 0; i < frames.Length; i++)
+        {
+            int size = TrayIconSizes[i];
+            writer.Write((byte)(size >= 256 ? 0 : size));   // width
+            writer.Write((byte)(size >= 256 ? 0 : size));   // height
+            writer.Write((byte)0);                          // palette colours
+            writer.Write((byte)0);                          // reserved
+            writer.Write((ushort)1);                        // planes
+            writer.Write((ushort)32);                       // bits per pixel
+            writer.Write((uint)frames[i].Length);
+            writer.Write((uint)offset);
+            offset += frames[i].Length;
+        }
+
+        foreach (var frame in frames)
+        {
+            writer.Write(frame);
+        }
+
+        writer.Flush();
+        return stream.ToArray();
+    }
+
+    private static byte[] EncodeIcoFrame(SKBitmap bitmap)
+    {
+        int width = bitmap.Width;
+        int height = bitmap.Height;
+        int maskStride = ((width + 31) / 32) * 4;
+
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream);
+
+        // BITMAPINFOHEADER (height counts the XOR bitmap plus the AND mask)
+        writer.Write((uint)40);
+        writer.Write(width);
+        writer.Write(height * 2);
+        writer.Write((ushort)1);
+        writer.Write((ushort)32);
+        writer.Write((uint)0);                                          // BI_RGB
+        writer.Write((uint)((width * height * 4) + (maskStride * height)));
+        writer.Write(0);
+        writer.Write(0);
+        writer.Write((uint)0);
+        writer.Write((uint)0);
+
+        // XOR bitmap: bottom-up BGRA, straight (non-premultiplied) alpha
+        for (int y = height - 1; y >= 0; y--)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                var pixel = bitmap.GetPixel(x, y);
+                writer.Write(pixel.Blue);
+                writer.Write(pixel.Green);
+                writer.Write(pixel.Red);
+                writer.Write(pixel.Alpha);
+            }
+        }
+
+        // AND mask: bottom-up, 1 = transparent
+        var maskRow = new byte[maskStride];
+        for (int y = height - 1; y >= 0; y--)
+        {
+            Array.Clear(maskRow);
+            for (int x = 0; x < width; x++)
+            {
+                if (bitmap.GetPixel(x, y).Alpha == 0)
+                {
+                    maskRow[x / 8] |= (byte)(0x80 >> (x % 8));
+                }
+            }
+            writer.Write(maskRow);
+        }
+
+        writer.Flush();
+        return stream.ToArray();
     }
 
     public byte[] RenderBadgePngBytes(double deltaHours, string text, int size = 64) =>

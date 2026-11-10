@@ -24,6 +24,9 @@ AllowNoIcons=yes
 OutputDir=..\dist
 OutputBaseFilename=VSNAiRateTracker-Setup-{#MyAppVersion}-win-x64
 SetupIconFile=..\..\VSNAiRateTracker\Assets\icon.ico
+; Wizard header image generated from the application icon (VSNAiRateTracker\Assets\icon.png), one file per DPI scale
+WizardSmallImageFile=assets\wizard-small-55.bmp,assets\wizard-small-83.bmp,assets\wizard-small-110.bmp,assets\wizard-small-138.bmp
+WizardImageAlphaFormat=defined
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -46,7 +49,7 @@ Source: "{#PublishDir}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "{#MyAppExeName}"
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 Name: "{userstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: autostart

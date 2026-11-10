@@ -30,7 +30,7 @@ public class TrayIconManager : ITrayIconManager
             {
                 ToolTipText = "VSNAiRateTracker - Inicializando...",
                 IsVisible = true,
-                Icon = _iconRenderer.RenderBadgeWindowIcon(0.0, "...", 64)
+                Icon = _iconRenderer.RenderTrayBadgeIcon(0.0, "...")
             };
 
             var menu = new NativeMenu();
@@ -89,7 +89,7 @@ public class TrayIconManager : ITrayIconManager
 
             try
             {
-                _trayIcon.Icon = _iconRenderer.RenderBadgeWindowIcon(state.ShortText, state.StatusColorHex, 64);
+                _trayIcon.Icon = _iconRenderer.RenderTrayBadgeIcon(state.ShortText, state.StatusColorHex);
                 _trayIcon.ToolTipText = state.TooltipText;
             }
             catch
@@ -111,7 +111,7 @@ public class TrayIconManager : ITrayIconManager
 
             try
             {
-                _trayIcon.Icon = _iconRenderer.RenderAlertWindowIcon(isCritical, 64);
+                _trayIcon.Icon = _iconRenderer.RenderTrayAlertIcon(isCritical);
                 _trayIcon.ToolTipText = tooltip;
             }
             catch
@@ -133,7 +133,7 @@ public class TrayIconManager : ITrayIconManager
 
             try
             {
-                _trayIcon.Icon = _iconRenderer.RenderBadgeWindowIcon(deltaHours, shortText, 64);
+                _trayIcon.Icon = _iconRenderer.RenderTrayBadgeIcon(deltaHours, shortText);
                 _trayIcon.ToolTipText = tooltip;
             }
             catch

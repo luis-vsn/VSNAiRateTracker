@@ -7,7 +7,8 @@ Aplicación de escritorio ligera para la bandeja del sistema (*System Tray* / *M
 ## Características Principales
 
 * **Icono dinámico en la bandeja del sistema (System Tray):**
-  * Renderizado en memoria a 64x64 píxeles mediante **SkiaSharp**.
+  * Renderizado en memoria con **SkiaSharp** como `.ico` multi-resolución (16, 20, 24, 28, 32, 40, 48 y 64 px): Windows elige el fotograma exacto para la escala DPI de la barra de tareas, sin reescalados.
+  * Cifra en el color de estado con contorno oscuro sobre fondo transparente (Bahnschrift condensada), dibujada al tamaño nativo de cada fotograma.
   * Código de colores de semáforo intuitivo:
     * 🟢 **Verde (`#2ECC71`):** `DeltaHours >= 0h` (Dentro de margen o con colchón de cuota).
     * 🟠 **Ámbar (`#F39C12`):** `0 > DeltaHours >= -2h` (Retraso leve de consumo).
@@ -55,6 +56,7 @@ VSNAiRateTracker/
 │   ├── Services/
 │   │   ├── AnthropicApiService.cs # Cliente HTTP resiliente con reintentos
 │   │   ├── BurnDownCalculator.cs  # Motor matemático de cálculo de desfase
+│   │   ├── ClaudeCodeStatsService.cs # Tokens/contexto locales de Claude Code (~/.claude/projects)
 │   │   ├── IconRendererService.cs # Generación de bitmaps dinámicos con SkiaSharp
 │   │   ├── SecureStorageService.cs# Cifrado AES-GCM y gestión de claves
 │   │   ├── SyncOrchestrator.cs    # Bucle periódico con PeriodicTimer
@@ -121,9 +123,29 @@ Cada métrica, log y traza enviada por la aplicación incluye de forma automáti
 * `service.name`: Nombre del servicio configurado (por defecto `vsn-ai-rate-tracker`).
 * `service.version`: Versión de la aplicación (`0.0.1`).
 
+### 4. Métricas publicadas
+
+Todas las series llevan el `instance` del equipo emisor.
+
+| Métrica (prefijo `vsn.rate_tracker.`) | Etiquetas | Descripción |
+|---|---|---|
+| `delta_hours`, `status_code`, `total_work_hours`, `elapsed_work_hours`, `expected_ratio_percent` | – | Estado del burndown respecto a la jornada |
+| `anthropic.utilization_percent` | – | Cuota principal usada por el burndown (semanal) |
+| `anthropic.five_hour_*`, `anthropic.seven_day_*` | – | Ventanas de 5 h y 7 días (uso y horas hasta el reset), Opus y Sonnet |
+| `anthropic.limit.utilization_percent` | `limit` | **Todas** las ventanas de la pestaña *Usage* de la cuenta, una serie por ventana (`five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet`, `extra_usage` y cualquiera que Anthropic añada) |
+| `anthropic.limit.resets_in_hours` | `limit` | Horas hasta el reset de cada ventana |
+| `anthropic.extra_usage_*`, `anthropic.spend_*` | – | Uso extra (activado, %, créditos, límite mensual) y gasto (usado, límite, %) |
+| `claude_code.tokens_today` | `model`, `type` (`input`, `output`, `cache_read`, `cache_creation`) | Tokens consumidos hoy por Claude Code en este equipo |
+| `claude_code.messages_today` | `model` | Respuestas de la API recibidas hoy |
+| `claude_code.sessions_today` | – | Sesiones de Claude Code con actividad hoy |
+| `claude_code.context_tokens` | `model` | Ocupación de la ventana de contexto de la sesión activa más reciente (equivalente a `/context`) |
+| `syncs.total`, `sync.duration_ms`, `api.duration_ms` | `status` / `status_code` | Salud de la sincronización |
+
+Las métricas `claude_code.*` se calculan leyendo las transcripciones locales de Claude Code (`~/.claude/projects/**/*.jsonl`, o `CLAUDE_CONFIG_DIR`). Solo se leen contadores de tokens y nombres de modelo; **nunca el contenido de los mensajes**. Los contadores "de hoy" se reinician a medianoche (hora local).
+
 ---
 
 ## Estado Multiplataforma
 
 * **Windows:** Completado e implementado al 100% (Issues #1 a #7 cerrados).
-* **macOS:** Documentado en el **[Issue #8](https://github.com/luis-vsn/VSNAiRateTracker/issues/8)** para ser retomado por un compañero con hardware Mac (validación de Menu Bar, empaquetado DMG y soporte multilingüe).
+* **macOS:** El job de macOS en GitHub Actions es opcional (ejecución manual del workflow *CI* marcando *include_macos*) hasta validar la plataforma. Documentado en el **[Issue #8](https://github.com/luis-vsn/VSNAiRateTracker/issues/8)** para ser retomado por un compañero con hardware Mac (validación de Menu Bar, empaquetado DMG y soporte multilingüe).

@@ -50,10 +50,22 @@ TMP_DMG_DIR="$(mktemp -d)"
 cp -R "${APP_BUNDLE}" "${TMP_DMG_DIR}/"
 ln -s /Applications "${TMP_DMG_DIR}/Applications"
 
-hdiutil create -volname "VSN AI Rate Tracker" \
-    -srcfolder "${TMP_DMG_DIR}" \
-    -ov -format UDZO \
-    "${DMG_PATH}"
+# hdiutil intermittently fails with "Resource busy" on CI runners, so retry a few times
+MAX_ATTEMPTS=5
+for attempt in $(seq 1 "${MAX_ATTEMPTS}"); do
+    if hdiutil create -volname "VSN AI Rate Tracker" \
+        -srcfolder "${TMP_DMG_DIR}" \
+        -ov -format UDZO \
+        "${DMG_PATH}"; then
+        break
+    fi
+    if [ "${attempt}" -eq "${MAX_ATTEMPTS}" ]; then
+        echo "hdiutil create failed after ${MAX_ATTEMPTS} attempts" >&2
+        exit 1
+    fi
+    echo "hdiutil create failed (attempt ${attempt}/${MAX_ATTEMPTS}), retrying..." >&2
+    sleep $((attempt * 3))
+done
 
 rm -rf "${TMP_DMG_DIR}" "${DIST_DIR}/macos-publish"
 

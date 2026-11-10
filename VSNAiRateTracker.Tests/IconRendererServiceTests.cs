@@ -61,6 +61,9 @@ public class IconRendererServiceTests
     [Fact]
     public void RenderBadgeBitmap_MaximizesCanvasUsageForTaskbarLegibility()
     {
+        // Thresholds are calibrated for Bahnschrift, which only ships with Windows
+        if (!OperatingSystem.IsWindows()) return;
+
         using var bitmap = _sut.RenderBadgeBitmap("+0.2", "#2ECC71", 64);
 
         int minX = 64, maxX = 0, minY = 64, maxY = 0;
@@ -108,6 +111,9 @@ public class IconRendererServiceTests
     [Fact]
     public void RenderBadgeBitmap_ForNegativeDecimal_GeneratesTallCompactDigits()
     {
+        // Thresholds are calibrated for Bahnschrift, which only ships with Windows
+        if (!OperatingSystem.IsWindows()) return;
+
         using var bitmap = _sut.RenderBadgeBitmap("-0.4", "#2ECC71", 64);
         int minX = 64, maxX = 0, minY = 64, maxY = 0;
         for (int y = 0; y < 64; y++)
@@ -215,6 +221,9 @@ public class IconRendererServiceTests
     [InlineData("ERR")]
     public void RenderBadgeBitmap_NeverClipsOnRightOrLeftEdges(string text)
     {
+        // Thresholds are calibrated for Bahnschrift, which only ships with Windows
+        if (!OperatingSystem.IsWindows()) return;
+
         int size = 64;
         using var bmp = _sut.RenderBadgeBitmap(text, "#2ECC71", size);
 
@@ -244,15 +253,6 @@ public class IconRendererServiceTests
         int contentHeight = maxY - minY + 1;
         contentWidth.Should().BeGreaterThanOrEqualTo(25);
         contentHeight.Should().BeGreaterThanOrEqualTo(20);
-
-        // Save to scratch for visual inspection
-        var scratchDir = @"C:\Users\Luis Macia\.gemini\antigravity\brain\394273ca-0351-4053-b80f-a33cf9e93675\scratch";
-        var slug = text.Replace('+', 'p').Replace('-', 'm').Replace('.', '_');
-        var pngBytes = _sut.RenderBadgePngBytes(text, "#2ECC71", 64);
-        File.WriteAllBytes(Path.Combine(scratchDir, $"clean_{slug}_64.png"), pngBytes);
-
-        var pngBytes24 = _sut.RenderBadgePngBytes(text, "#2ECC71", 24);
-        File.WriteAllBytes(Path.Combine(scratchDir, $"clean_{slug}_24.png"), pngBytes24);
     }
 
     [Theory]
@@ -263,6 +263,9 @@ public class IconRendererServiceTests
     [InlineData("-120")]
     public void RenderBadgeBitmap_HandlesSpecialAndNonNumericValuesGracefully(string text)
     {
+        // Thresholds are calibrated for Bahnschrift, which only ships with Windows
+        if (!OperatingSystem.IsWindows()) return;
+
         using var bmp = _sut.RenderBadgeBitmap(text, "#2ECC71", 64);
         bmp.Should().NotBeNull();
         bmp.Width.Should().Be(64);
@@ -286,5 +289,92 @@ public class IconRendererServiceTests
         int contentHeight = maxY - minY + 1;
         contentWidth.Should().BeGreaterThanOrEqualTo(20);
         contentHeight.Should().BeGreaterThanOrEqualTo(10);
+    }
+
+    [Theory]
+    [InlineData("+0.4")]
+    [InlineData("-0.4")]
+    [InlineData("+12")]
+    [InlineData("-120")]
+    [InlineData("...")]
+    public void RenderBadgeBitmap_AtEveryTraySize_DrawsTextWithoutTouchingTheEdges(string text)
+    {
+        foreach (var size in IconRendererService.TrayIconSizes)
+        {
+            using var bmp = _sut.RenderBadgeBitmap(text, "#2ECC71", size);
+
+            int minX = size, maxX = -1, minY = size, maxY = -1;
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    if (bmp.GetPixel(x, y).Alpha > 127)
+                    {
+                        if (x < minX) minX = x;
+                        if (x > maxX) maxX = x;
+                        if (y < minY) minY = y;
+                        if (y > maxY) maxY = y;
+                    }
+                }
+            }
+
+            maxX.Should().BeGreaterThan(-1, $"'{text}' must be drawn at {size}px");
+            minX.Should().BeGreaterThan(0, $"left edge of '{text}' must not be clipped at {size}px");
+            maxX.Should().BeLessThan(size - 1, $"right edge of '{text}' must not be clipped at {size}px");
+            minY.Should().BeGreaterThan(0, $"top edge of '{text}' must not be clipped at {size}px");
+            maxY.Should().BeLessThan(size - 1, $"bottom edge of '{text}' must not be clipped at {size}px");
+        }
+    }
+
+    [Fact]
+    public void RenderBadgeIcoBytes_ContainsOneNativeFramePerTraySize()
+    {
+        var ico = _sut.RenderBadgeIcoBytes("+0.4", "#2ECC71");
+        AssertValidIco(ico);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RenderAlertIcoBytes_ContainsOneNativeFramePerTraySize(bool isCritical)
+    {
+        var ico = _sut.RenderAlertIcoBytes(isCritical);
+        AssertValidIco(ico);
+    }
+
+    private static void AssertValidIco(byte[] ico)
+    {
+        var sizes = IconRendererService.TrayIconSizes;
+
+        BitConverter.ToUInt16(ico, 0).Should().Be(0);
+        BitConverter.ToUInt16(ico, 2).Should().Be(1);
+        BitConverter.ToUInt16(ico, 4).Should().Be((ushort)sizes.Length);
+
+        int expectedOffset = 6 + (16 * sizes.Length);
+        for (int i = 0; i < sizes.Length; i++)
+        {
+            int entry = 6 + (16 * i);
+            int size = sizes[i];
+
+            ico[entry].Should().Be((byte)size);
+            ico[entry + 1].Should().Be((byte)size);
+            BitConverter.ToUInt16(ico, entry + 6).Should().Be(32);
+
+            int length = (int)BitConverter.ToUInt32(ico, entry + 8);
+            int offset = (int)BitConverter.ToUInt32(ico, entry + 12);
+            offset.Should().Be(expectedOffset);
+
+            int maskStride = ((size + 31) / 32) * 4;
+            length.Should().Be(40 + (size * size * 4) + (maskStride * size));
+
+            // BITMAPINFOHEADER: 40 bytes, width = size, height = 2 * size (XOR bitmap + AND mask)
+            BitConverter.ToUInt32(ico, offset).Should().Be(40);
+            BitConverter.ToInt32(ico, offset + 4).Should().Be(size);
+            BitConverter.ToInt32(ico, offset + 8).Should().Be(size * 2);
+
+            expectedOffset += length;
+        }
+
+        ico.Length.Should().Be(expectedOffset);
     }
 }

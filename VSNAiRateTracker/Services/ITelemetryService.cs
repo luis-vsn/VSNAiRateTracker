@@ -11,6 +11,7 @@ public interface ITelemetryService : IDisposable
     Activity? StartActivity(string name);
     void RecordUsageSync(AnthropicUsageResult usageResult, UsageState usageState, long durationMs);
     void RecordUsageSync(double percentConsumed, double deltaHours, RateStatus status, long durationMs);
+    void RecordClaudeCodeStats(ClaudeCodeLocalStats stats);
     void RecordApiCall(int statusCode, bool isSuccess, long durationMs);
     void LogInfo(string message);
     void LogWarning(string message);
