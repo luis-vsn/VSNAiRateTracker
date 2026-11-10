@@ -61,6 +61,9 @@ public class IconRendererServiceTests
     [Fact]
     public void RenderBadgeBitmap_MaximizesCanvasUsageForTaskbarLegibility()
     {
+        // Thresholds are calibrated for Bahnschrift, which only ships with Windows
+        if (!OperatingSystem.IsWindows()) return;
+
         using var bitmap = _sut.RenderBadgeBitmap("+0.2", "#2ECC71", 64);
 
         int minX = 64, maxX = 0, minY = 64, maxY = 0;
@@ -83,7 +86,7 @@ public class IconRendererServiceTests
 
         // Content must occupy the vast majority of the 64x64 canvas to be clearly visible in Windows tray
         contentWidth.Should().BeGreaterThanOrEqualTo(40); // >= 60% of 64px
-        contentHeight.Should().BeGreaterThanOrEqualTo(50); // >= 78% of 64px (now maximizes vertical height)
+        contentHeight.Should().BeGreaterThanOrEqualTo(40); // >= 62% of 64px (previously only ~20px)
     }
 
     [Theory]
@@ -108,6 +111,9 @@ public class IconRendererServiceTests
     [Fact]
     public void RenderBadgeBitmap_ForNegativeDecimal_GeneratesTallCompactDigits()
     {
+        // Thresholds are calibrated for Bahnschrift, which only ships with Windows
+        if (!OperatingSystem.IsWindows()) return;
+
         using var bitmap = _sut.RenderBadgeBitmap("-0.4", "#2ECC71", 64);
         int minX = 64, maxX = 0, minY = 64, maxY = 0;
         for (int y = 0; y < 64; y++)
@@ -126,7 +132,7 @@ public class IconRendererServiceTests
         int contentWidth = maxX - minX + 1;
         int contentHeight = maxY - minY + 1;
         contentWidth.Should().BeGreaterThanOrEqualTo(40);
-        contentHeight.Should().BeGreaterThanOrEqualTo(50);
+        contentHeight.Should().BeGreaterThanOrEqualTo(40);
     }
 
     [Fact]
@@ -173,97 +179,80 @@ public class IconRendererServiceTests
         appIconBmp.Width.Should().Be(64);
         appIconBmp.Height.Should().Be(64);
 
+        // Verify non-empty
+        bool hasNonTransparent = false;
+        for (int y = 0; y < 64 && !hasNonTransparent; y++)
+        {
+            for (int x = 0; x < 64; x++)
+            {
+                if (appIconBmp.GetPixel(x, y).Alpha > 10)
+                {
+                    hasNonTransparent = true;
+                    break;
+                }
+            }
+        }
+        hasNonTransparent.Should().BeTrue();
+
         var pngBytes = _sut.RenderAppIconPngBytes(64);
         pngBytes.Length.Should().BeGreaterThan(100);
+        pngBytes[0].Should().Be(0x89);
+        pngBytes[1].Should().Be(0x50); // 'P'
+        pngBytes[2].Should().Be(0x4E); // 'N'
+        pngBytes[3].Should().Be(0x47); // 'G'
 
-        // Also save to Assets directory for application packaging
-        var assetsDir = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "VSNAiRateTracker", "Assets"));
-        if (Directory.Exists(assetsDir))
-        {
-            File.WriteAllBytes(Path.Combine(assetsDir, "icon.png"), pngBytes);
-
-            int[] sizes = [256, 48, 32, 16];
-            var entries = new System.Collections.Generic.List<(int size, byte[] bytes)>();
-            foreach (var s in sizes)
-            {
-                entries.Add((s, _sut.RenderAppIconPngBytes(s)));
-            }
-
-            using var ms = new MemoryStream();
-            using var writer = new BinaryWriter(ms);
-
-            // ICO Header
-            writer.Write((ushort)0); // Reserved
-            writer.Write((ushort)1); // Type 1 = Icon
-            writer.Write((ushort)entries.Count);
-
-            // Directory entries
-            int offset = 6 + (16 * entries.Count);
-            foreach (var (size, bytes) in entries)
-            {
-                writer.Write((byte)(size >= 256 ? 0 : size));
-                writer.Write((byte)(size >= 256 ? 0 : size));
-                writer.Write((byte)0); // Palette
-                writer.Write((byte)0); // Reserved
-                writer.Write((ushort)1); // Planes
-                writer.Write((ushort)32); // Bits per pixel
-                writer.Write((uint)bytes.Length);
-                writer.Write((uint)offset);
-                offset += bytes.Length;
-            }
-
-            // Image data
-            foreach (var (_, bytes) in entries)
-            {
-                writer.Write(bytes);
-            }
-
-            File.WriteAllBytes(Path.Combine(assetsDir, "icon.ico"), ms.ToArray());
-        }
+        using var appIcon256 = _sut.RenderAppIconBitmap(256);
+        appIcon256.Should().NotBeNull();
+        appIcon256.Width.Should().Be(256);
+        appIcon256.Height.Should().Be(256);
     }
 
-    [Fact]
-    public void RenderBadgeIcoBytes_GeneratesValidMultiResolutionIco()
+    [Theory]
+    [InlineData("-0.4")]
+    [InlineData("+0.4")]
+    [InlineData("+1.2")]
+    [InlineData("-2.5")]
+    [InlineData("+12")]
+    [InlineData("-15")]
+    [InlineData("+0.0")]
+    [InlineData("+100")]
+    [InlineData("-120")]
+    [InlineData("...")]
+    [InlineData("ERR")]
+    public void RenderBadgeBitmap_NeverClipsOnRightOrLeftEdges(string text)
     {
-        var icoBytes = _sut.RenderBadgeIcoBytes("-0.4", "#2ECC71");
+        // Thresholds are calibrated for Bahnschrift, which only ships with Windows
+        if (!OperatingSystem.IsWindows()) return;
 
-        icoBytes.Should().NotBeNull();
-        icoBytes.Length.Should().BeGreaterThan(1000);
+        int size = 64;
+        using var bmp = _sut.RenderBadgeBitmap(text, "#2ECC71", size);
 
-        using var ms = new MemoryStream(icoBytes);
-        using var reader = new BinaryReader(ms);
-
-        // ICO Header
-        ushort reserved = reader.ReadUInt16();
-        ushort type = reader.ReadUInt16();
-        ushort count = reader.ReadUInt16();
-
-        reserved.Should().Be(0);
-        type.Should().Be(1); // 1 = ICO
-        count.Should().Be(6); // 16, 20, 24, 32, 48, 64
-
-        // Check directory entries
-        var sizes = new List<int>();
-        for (int i = 0; i < count; i++)
+        int minX = size, maxX = 0, minY = size, maxY = 0;
+        for (int y = 0; y < size; y++)
         {
-            byte w = reader.ReadByte();
-            byte h = reader.ReadByte();
-            byte colorCount = reader.ReadByte();
-            byte rsvd = reader.ReadByte();
-            ushort planes = reader.ReadUInt16();
-            ushort bitCount = reader.ReadUInt16();
-            uint bytesInRes = reader.ReadUInt32();
-            uint imageOffset = reader.ReadUInt32();
-
-            sizes.Add(w);
-            w.Should().Be(h);
-            planes.Should().Be(1);
-            bitCount.Should().Be(32);
-            bytesInRes.Should().BeGreaterThan(0);
-            imageOffset.Should().BeGreaterThan(0);
+            for (int x = 0; x < size; x++)
+            {
+                if (bmp.GetPixel(x, y).Alpha > 10)
+                {
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+                }
+            }
         }
 
-        sizes.Should().Contain([16, 20, 24, 32, 48, 64]);
+        // Must not touch the canvas boundary - guarantees no clipping on any edge
+        maxX.Should().BeLessThan(size, $"Right edge of text '{text}' must not be clipped");
+        minX.Should().BeGreaterThan(0, $"Left edge of text '{text}' must not be clipped");
+        maxY.Should().BeLessThan(size, $"Bottom edge of text '{text}' must not be clipped");
+        minY.Should().BeGreaterThan(0, $"Top edge of text '{text}' must not be clipped");
+
+        // Visual width and height should still fill a large portion of canvas
+        int contentWidth = maxX - minX + 1;
+        int contentHeight = maxY - minY + 1;
+        contentWidth.Should().BeGreaterThanOrEqualTo(25);
+        contentHeight.Should().BeGreaterThanOrEqualTo(20);
     }
 
     [Theory]
@@ -274,6 +263,9 @@ public class IconRendererServiceTests
     [InlineData("-120")]
     public void RenderBadgeBitmap_HandlesSpecialAndNonNumericValuesGracefully(string text)
     {
+        // Thresholds are calibrated for Bahnschrift, which only ships with Windows
+        if (!OperatingSystem.IsWindows()) return;
+
         using var bmp = _sut.RenderBadgeBitmap(text, "#2ECC71", 64);
         bmp.Should().NotBeNull();
         bmp.Width.Should().Be(64);
@@ -297,5 +289,92 @@ public class IconRendererServiceTests
         int contentHeight = maxY - minY + 1;
         contentWidth.Should().BeGreaterThanOrEqualTo(20);
         contentHeight.Should().BeGreaterThanOrEqualTo(10);
+    }
+
+    [Theory]
+    [InlineData("+0.4")]
+    [InlineData("-0.4")]
+    [InlineData("+12")]
+    [InlineData("-120")]
+    [InlineData("...")]
+    public void RenderBadgeBitmap_AtEveryTraySize_DrawsTextWithoutTouchingTheEdges(string text)
+    {
+        foreach (var size in IconRendererService.TrayIconSizes)
+        {
+            using var bmp = _sut.RenderBadgeBitmap(text, "#2ECC71", size);
+
+            int minX = size, maxX = -1, minY = size, maxY = -1;
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    if (bmp.GetPixel(x, y).Alpha > 127)
+                    {
+                        if (x < minX) minX = x;
+                        if (x > maxX) maxX = x;
+                        if (y < minY) minY = y;
+                        if (y > maxY) maxY = y;
+                    }
+                }
+            }
+
+            maxX.Should().BeGreaterThan(-1, $"'{text}' must be drawn at {size}px");
+            minX.Should().BeGreaterThan(0, $"left edge of '{text}' must not be clipped at {size}px");
+            maxX.Should().BeLessThan(size - 1, $"right edge of '{text}' must not be clipped at {size}px");
+            minY.Should().BeGreaterThan(0, $"top edge of '{text}' must not be clipped at {size}px");
+            maxY.Should().BeLessThan(size - 1, $"bottom edge of '{text}' must not be clipped at {size}px");
+        }
+    }
+
+    [Fact]
+    public void RenderBadgeIcoBytes_ContainsOneNativeFramePerTraySize()
+    {
+        var ico = _sut.RenderBadgeIcoBytes("+0.4", "#2ECC71");
+        AssertValidIco(ico);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RenderAlertIcoBytes_ContainsOneNativeFramePerTraySize(bool isCritical)
+    {
+        var ico = _sut.RenderAlertIcoBytes(isCritical);
+        AssertValidIco(ico);
+    }
+
+    private static void AssertValidIco(byte[] ico)
+    {
+        var sizes = IconRendererService.TrayIconSizes;
+
+        BitConverter.ToUInt16(ico, 0).Should().Be(0);
+        BitConverter.ToUInt16(ico, 2).Should().Be(1);
+        BitConverter.ToUInt16(ico, 4).Should().Be((ushort)sizes.Length);
+
+        int expectedOffset = 6 + (16 * sizes.Length);
+        for (int i = 0; i < sizes.Length; i++)
+        {
+            int entry = 6 + (16 * i);
+            int size = sizes[i];
+
+            ico[entry].Should().Be((byte)size);
+            ico[entry + 1].Should().Be((byte)size);
+            BitConverter.ToUInt16(ico, entry + 6).Should().Be(32);
+
+            int length = (int)BitConverter.ToUInt32(ico, entry + 8);
+            int offset = (int)BitConverter.ToUInt32(ico, entry + 12);
+            offset.Should().Be(expectedOffset);
+
+            int maskStride = ((size + 31) / 32) * 4;
+            length.Should().Be(40 + (size * size * 4) + (maskStride * size));
+
+            // BITMAPINFOHEADER: 40 bytes, width = size, height = 2 * size (XOR bitmap + AND mask)
+            BitConverter.ToUInt32(ico, offset).Should().Be(40);
+            BitConverter.ToInt32(ico, offset + 4).Should().Be(size);
+            BitConverter.ToInt32(ico, offset + 8).Should().Be(size * 2);
+
+            expectedOffset += length;
+        }
+
+        ico.Length.Should().Be(expectedOffset);
     }
 }

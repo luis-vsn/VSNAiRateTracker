@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -518,6 +519,57 @@ public class AnthropicApiServiceTests
         result.Currency.Should().Be("EUR");
         result.SpendUsedAmount.Should().Be(12.50);
         result.SpendPercent.Should().Be(25.0);
+
+        // Every window with a utilization value is exposed generically for telemetry
+        result.Limits.Select(l => l.Name).Should().BeEquivalentTo(
+            new[] { "five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet", "extra_usage" });
+        result.Limits.Single(l => l.Name == "seven_day").UtilizationPercent.Should().Be(30.0);
+        result.Limits.Single(l => l.Name == "seven_day").ResetsAt.Should().Be(DateTimeOffset.Parse("2026-11-12T16:00:00.000Z"));
+        result.Limits.Single(l => l.Name == "seven_day_opus").ResetsAt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetUsageAsync_WhenPayloadHasUnknownWindowsLimitsArrayAndSpendLimit_ExposesThemForTelemetry()
+    {
+        // Arrange
+        var tokens = new VSNAiRateTracker.Models.OAuthTokens { AccessToken = "valid-token" };
+        var json = """
+        {
+            "five_hour": { "utilization": 10.0, "resets_at": "2026-11-09T19:00:00.000Z" },
+            "seven_day": { "utilization": 40.0, "resets_at": "2026-11-12T16:00:00.000Z" },
+            "seven_day_brand_new_window": { "utilization": 7.5, "resets_at": "2026-11-13T00:00:00.000Z" },
+            "seven_day_opus": null,
+            "limits": [
+                { "kind": "seven_day", "group": "weekly", "percent": 99.0 },
+                { "kind": "weekly_design", "group": "weekly", "percent": 3.0, "resets_at": "2026-11-14T00:00:00.000Z" }
+            ],
+            "spend": {
+                "used": { "amount_minor": 1250, "exponent": 2 },
+                "limit": { "amount_minor": 5000, "exponent": 2 },
+                "percent": 25.0
+            }
+        }
+        """;
+
+        var handler = new TestHttpMessageHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json")
+        }));
+        var sut = new AnthropicApiService(new HttpClient(handler));
+
+        // Act
+        var result = await sut.GetUsageAsync(apiKey: null, tokens: tokens);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.SpendLimitAmount.Should().Be(50.0);
+        result.Limits.Select(l => l.Name).Should().BeEquivalentTo(
+            new[] { "five_hour", "seven_day", "seven_day_brand_new_window", "weekly_design" });
+
+        // Root windows win over duplicated entries of the limits array
+        result.Limits.Single(l => l.Name == "seven_day").UtilizationPercent.Should().Be(40.0);
+        result.Limits.Single(l => l.Name == "seven_day_brand_new_window").UtilizationPercent.Should().Be(7.5);
+        result.Limits.Single(l => l.Name == "weekly_design").ResetsAt.Should().Be(DateTimeOffset.Parse("2026-11-14T00:00:00.000Z"));
     }
 }
 

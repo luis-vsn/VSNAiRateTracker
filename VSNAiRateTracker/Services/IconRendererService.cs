@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using Avalonia.Controls;
 using SkiaSharp;
@@ -13,19 +12,22 @@ public interface IIconRendererService
     SKBitmap RenderBadgeBitmap(string text, string? colorHex = null, int size = 64);
     byte[] RenderBadgePngBytes(double deltaHours, string text, int size = 64);
     byte[] RenderBadgePngBytes(string text, string? colorHex = null, int size = 64);
-    byte[] RenderBadgeIcoBytes(double deltaHours, string text);
-    byte[] RenderBadgeIcoBytes(string text, string? colorHex = null);
     WindowIcon RenderBadgeWindowIcon(double deltaHours, string text, int size = 64);
     WindowIcon RenderBadgeWindowIcon(string text, string? colorHex = null, int size = 64);
 
     SKBitmap RenderAlertBitmap(bool isCritical = false, int size = 64);
     byte[] RenderAlertPngBytes(bool isCritical = false, int size = 64);
-    byte[] RenderAlertIcoBytes(bool isCritical = false);
     WindowIcon RenderAlertWindowIcon(bool isCritical = false, int size = 64);
+
+    // Tray-specific icons: multi-resolution .ico on Windows (one natively rendered frame per DPI scale)
+    byte[] RenderBadgeIcoBytes(string text, string? colorHex = null);
+    byte[] RenderAlertIcoBytes(bool isCritical = false);
+    WindowIcon RenderTrayBadgeIcon(string text, string? colorHex = null);
+    WindowIcon RenderTrayBadgeIcon(double deltaHours, string text);
+    WindowIcon RenderTrayAlertIcon(bool isCritical = false);
 
     SKBitmap RenderAppIconBitmap(int size = 64);
     byte[] RenderAppIconPngBytes(int size = 64);
-    byte[] RenderAppIconIcoBytes();
     WindowIcon RenderAppIconWindowIcon(int size = 64);
 }
 
@@ -35,8 +37,6 @@ public class IconRendererService : IIconRendererService
     public static readonly SKColor ColorAmber = SKColor.Parse("#F39C12");
     public static readonly SKColor ColorRed = SKColor.Parse("#E74C3C");
     public static readonly SKColor ColorBlue = SKColor.Parse("#3498DB");
-
-    private static readonly int[] StandardTrayIconSizes = [16, 20, 24, 32, 48, 64];
 
     private const double Epsilon = 1e-6;
 
@@ -73,16 +73,17 @@ public class IconRendererService : IIconRendererService
 
         using var typeface = ResolveBadgeTypeface();
 
-        // Check if starts with sign
-        bool hasSign = displayText.StartsWith('+') || displayText.StartsWith('-');
-        char signChar = hasSign ? displayText[0] : ' ';
-        string restText = hasSign ? displayText.Substring(1) : displayText;
-
-        // Check if rest is numeric (with optional decimal point)
-        int dotIdx = restText.IndexOf('.');
-        string intPart = dotIdx >= 0 ? restText.Substring(0, dotIdx) : restText;
-        string? decPart = dotIdx >= 0 ? restText.Substring(dotIdx + 1) : null;
-        bool isNumeric = int.TryParse(intPart, out _) && (decPart == null || int.TryParse(decPart, out _));
+        // Outer dark stroke to guarantee contrast on both dark and light taskbars
+        float strokeWidth = Math.Max(1.0f, size * 0.045f);
+        using var strokePaint = new SKPaint
+        {
+            Color = new SKColor(0, 0, 0, 220),
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = strokeWidth,
+            StrokeJoin = SKStrokeJoin.Round,
+            StrokeCap = SKStrokeCap.Round
+        };
 
         using var fillPaint = new SKPaint
         {
@@ -91,161 +92,57 @@ public class IconRendererService : IIconRendererService
             Style = SKPaintStyle.Fill
         };
 
-        // Dark outer stroke drawn under fill to guarantee sharpness on both dark and light taskbars without eating into digit glyphs
-        using var outlinePaint = new SKPaint
-        {
-            Color = new SKColor(0, 0, 0, 230),
-            IsAntialias = true,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = Math.Max(1.0f, size * 0.04f),
-            StrokeJoin = SKStrokeJoin.Round,
-            StrokeCap = SKStrokeCap.Round
-        };
+        // Strict safe bounds to guarantee ZERO clipping on left, right, top or bottom:
+        // Reserve margin for stroke and edge buffer
+        float margin = strokeWidth + (size * 0.03f);
+        float maxW = size - (2f * margin);
+        float maxH = size - (2f * margin);
 
-        using var testPaint = new SKPaint { IsAntialias = true };
-
-        if (!isNumeric)
-        {
-            // Non-numeric fallback (e.g. "...", "ERR", "OK")
-            float testFontSize = size * 0.5f;
-            using var fbFont = new SKFont(typeface, testFontSize) { Subpixel = true };
-            fbFont.MeasureText(displayText, out var fbBounds, testPaint);
-            float scale = Math.Min((size * 0.92f) / Math.Max(fbBounds.Width, 1f), (size * 0.85f) / Math.Max(fbBounds.Height, 1f));
-            using var finalFont = new SKFont(typeface, testFontSize * scale) { Subpixel = true };
-            finalFont.MeasureText(displayText, out var b, testPaint);
-            float drawX = (size - b.Width) / 2f - b.Left;
-            float drawY = (size / 2f) - (b.Top + (b.Height / 2f));
-            canvas.DrawText(displayText, drawX, drawY, SKTextAlign.Left, finalFont, outlinePaint);
-            canvas.DrawText(displayText, drawX, drawY, SKTextAlign.Left, finalFont, fillPaint);
-            return bitmap;
-        }
-
-        // Target digit height: 85% of canvas height to maximize visibility in Windows system tray
-        float targetDigitH = size * 0.85f;
-        float refFontSize = 40f;
-        using var refFont = new SKFont(typeface, refFontSize);
-        refFont.MeasureText("8", out var refBounds, testPaint);
+        // Measure natural proportions with reference font size (32px)
+        float refSize = 32f;
+        using var testFont = new SKFont(typeface, refSize) { Subpixel = true };
+        testFont.MeasureText(displayText, out var refBounds, fillPaint);
+        float naturalW = Math.Max(refBounds.Width, 1f);
         float naturalH = Math.Max(refBounds.Height, 1f);
-        float digitFontSize = refFontSize * (targetDigitH / naturalH);
 
-        // Sign dimensions
-        bool isMinus = signChar == '-';
-        float signW = hasSign ? size * (isMinus ? 0.16f : 0.20f) : 0f;
-        float signThick = Math.Max(1.5f, size * (isMinus ? 0.09f : 0.08f));
-        float signRightGap = hasSign ? size * 0.04f : 0f;
-
-        // Decimal dot dimensions
-        float dotW = decPart != null ? Math.Max(2f, size * 0.07f) : 0f;
-        float dotGap = decPart != null ? size * 0.025f : 0f;
-
-        string allDigits = intPart + (decPart ?? "");
-        int digitCount = allDigits.Length;
-
-        // Measure natural widths of all digits
-        using var measureFont = new SKFont(typeface, digitFontSize);
-        float naturalTotalDigitW = 0f;
-        float interDigitGap = (intPart.Length > 1 ? size * 0.03f : 0f);
-        for (int i = 0; i < digitCount; i++)
+        // If text is horizontally elongated (e.g. 4 chars like "-0.4"), allow slight condensation
+        // so height can remain tall and readable without clipping the width
+        float targetScaleH = maxH / naturalH;
+        float estWAtTargetH = naturalW * targetScaleH;
+        float scaleX = 1.0f;
+        if (estWAtTargetH > maxW)
         {
-            var ch = allDigits.Substring(i, 1);
-            measureFont.MeasureText(ch, out var b, testPaint);
-            naturalTotalDigitW += b.Width;
+            scaleX = Math.Clamp(maxW / estWAtTargetH, 0.70f, 1.0f);
         }
-        naturalTotalDigitW += (intPart.Length - 1) * interDigitGap;
 
-        // Available width for digits
-        float availW = size - (signW + signRightGap + (decPart != null ? (dotW + dotGap * 2) : 0f));
-        float scaleX = Math.Min(1.05f, (availW * 0.98f) / Math.Max(naturalTotalDigitW, 1f));
+        // Calculate font size that strictly honors both maxW and maxH with the chosen scaleX
+        float scale = Math.Min(maxW / (naturalW * scaleX), maxH / naturalH);
+        float finalFontSize = refSize * scale;
 
-        using var font = new SKFont(typeface, digitFontSize)
+        using var font = new SKFont(typeface, finalFontSize)
         {
             ScaleX = scaleX,
             Subpixel = true
         };
 
-        // Re-measure with final scale
-        float finalDigitW = 0f;
-        float[] finalCharWidths = new float[digitCount];
-        float[] finalCharLefts = new float[digitCount];
-        for (int i = 0; i < digitCount; i++)
+        // Measure exact final ink bounds of the entire string
+        font.MeasureText(displayText, out var finalBounds, fillPaint);
+
+        // Safety check: if font metrics rounding caused overflow, shrink slightly
+        if (finalBounds.Width > maxW || finalBounds.Height > maxH)
         {
-            var ch = allDigits.Substring(i, 1);
-            font.MeasureText(ch, out var b, testPaint);
-            finalCharWidths[i] = b.Width;
-            finalCharLefts[i] = b.Left;
-            finalDigitW += b.Width;
-        }
-        finalDigitW += (intPart.Length - 1) * interDigitGap;
-
-        float totalVisualW = signW + signRightGap + finalDigitW + (decPart != null ? (dotW + dotGap * 2) : 0f);
-        float startX = Math.Max(0.5f, (size - totalVisualW) / 2f);
-
-        // Center digits vertically
-        font.MeasureText("8", out var final8Bounds, testPaint);
-        float baseY = (size / 2f) - (final8Bounds.Top + (final8Bounds.Height / 2f));
-
-        // 1. Draw Sign
-        float signX = startX;
-        float signMidY = size / 2f;
-        if (hasSign)
-        {
-            if (isMinus)
-            {
-                float mLeft = signX;
-                float mRight = signX + signW;
-                float mTop = signMidY - (signThick / 2f);
-                float mBottom = signMidY + (signThick / 2f);
-                var rect = new SKRect(mLeft, mTop, mRight, mBottom);
-                canvas.DrawRoundRect(rect, signThick * 0.3f, signThick * 0.3f, outlinePaint);
-                canvas.DrawRoundRect(rect, signThick * 0.3f, signThick * 0.3f, fillPaint);
-            }
-            else
-            {
-                float crossR = signW / 2f;
-                float cX = signX + crossR;
-                float cY = signMidY;
-                var hRect = new SKRect(cX - crossR, cY - (signThick / 2f), cX + crossR, cY + (signThick / 2f));
-                var vRect = new SKRect(cX - (signThick / 2f), cY - crossR, cX + (signThick / 2f), cY + crossR);
-                canvas.DrawRoundRect(hRect, signThick * 0.3f, signThick * 0.3f, outlinePaint);
-                canvas.DrawRoundRect(vRect, signThick * 0.3f, signThick * 0.3f, outlinePaint);
-                canvas.DrawRoundRect(hRect, signThick * 0.3f, signThick * 0.3f, fillPaint);
-                canvas.DrawRoundRect(vRect, signThick * 0.3f, signThick * 0.3f, fillPaint);
-            }
+            float shrink = Math.Min(maxW / Math.Max(finalBounds.Width, 1f), maxH / Math.Max(finalBounds.Height, 1f));
+            font.Size *= shrink;
+            font.MeasureText(displayText, out finalBounds, fillPaint);
         }
 
-        float curX = signX + signW + signRightGap;
+        // Exact geometric centering of ink within canvas
+        float originX = (size / 2f) - (finalBounds.Left + (finalBounds.Width / 2f));
+        float originY = (size / 2f) - (finalBounds.Top + (finalBounds.Height / 2f));
 
-        // 2. Draw Integer Part
-        for (int i = 0; i < intPart.Length; i++)
-        {
-            var ch = intPart.Substring(i, 1);
-            float drawX = curX - finalCharLefts[i];
-            canvas.DrawText(ch, drawX, baseY, SKTextAlign.Left, font, outlinePaint);
-            canvas.DrawText(ch, drawX, baseY, SKTextAlign.Left, font, fillPaint);
-            curX += finalCharWidths[i] + (i < intPart.Length - 1 ? interDigitGap : 0f);
-        }
-
-        // 3. Draw Decimal Dot & Decimal Part if present
-        if (decPart != null)
-        {
-            curX += dotGap;
-            float dotBottom = baseY;
-            float dotLeft = curX;
-            var dotRect = new SKRect(dotLeft, dotBottom - dotW, dotLeft + dotW, dotBottom);
-            canvas.DrawRoundRect(dotRect, dotW * 0.3f, dotW * 0.3f, outlinePaint);
-            canvas.DrawRoundRect(dotRect, dotW * 0.3f, dotW * 0.3f, fillPaint);
-            curX += dotW + dotGap;
-
-            int decCharIdx = intPart.Length;
-            for (int i = 0; i < decPart.Length; i++)
-            {
-                var ch = decPart.Substring(i, 1);
-                float drawX = curX - finalCharLefts[decCharIdx + i];
-                canvas.DrawText(ch, drawX, baseY, SKTextAlign.Left, font, outlinePaint);
-                canvas.DrawText(ch, drawX, baseY, SKTextAlign.Left, font, fillPaint);
-                curX += finalCharWidths[decCharIdx + i];
-            }
-        }
+        // Draw outer stroke first, then fill on top
+        canvas.DrawText(displayText, originX, originY, SKTextAlign.Left, font, strokePaint);
+        canvas.DrawText(displayText, originX, originY, SKTextAlign.Left, font, fillPaint);
 
         return bitmap;
     }
@@ -280,6 +177,142 @@ public class IconRendererService : IIconRendererService
             ?? SKTypeface.Default;
     }
 
+    // ------------------------------------------------------------------------------------------------
+    // Tray icons
+    //
+    // Avalonia's Win32 backend asks the icon for its "small" variant at 16 px x taskbar DPI scale. Given
+    // a single PNG it rescales that bitmap (64 -> 16 px), which is what blurred the figure. Given an ICO
+    // it picks the frame of the matching size, so we ship one frame per common DPI scale, each rendered
+    // natively on its own pixel grid.
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>Frame sizes for 100/125/150/175/200/250/300/400 % scaling.</summary>
+    public static readonly int[] TrayIconSizes = { 16, 20, 24, 28, 32, 40, 48, 64 };
+
+    public byte[] RenderBadgeIcoBytes(string text, string? colorHex = null) =>
+        BuildIco(size => RenderBadgeBitmap(text, colorHex, size));
+
+    public byte[] RenderAlertIcoBytes(bool isCritical = false) =>
+        BuildIco(size => RenderAlertBitmap(isCritical, size));
+
+    public WindowIcon RenderTrayBadgeIcon(string text, string? colorHex = null)
+    {
+        var bytes = OperatingSystem.IsWindows()
+            ? RenderBadgeIcoBytes(text, colorHex)
+            : RenderBadgePngBytes(text, colorHex, 64);
+        using var stream = new MemoryStream(bytes);
+        return new WindowIcon(stream);
+    }
+
+    public WindowIcon RenderTrayBadgeIcon(double deltaHours, string text) =>
+        RenderTrayBadgeIcon(text, GetStatusColor(deltaHours).ToString());
+
+    public WindowIcon RenderTrayAlertIcon(bool isCritical = false)
+    {
+        var bytes = OperatingSystem.IsWindows()
+            ? RenderAlertIcoBytes(isCritical)
+            : RenderAlertPngBytes(isCritical, 64);
+        using var stream = new MemoryStream(bytes);
+        return new WindowIcon(stream);
+    }
+
+    /// <summary>
+    /// Builds a multi-resolution .ico with classic 32-bit DIB frames (XOR bitmap + 1-bit AND mask).
+    /// </summary>
+    private static byte[] BuildIco(Func<int, SKBitmap> renderFrame)
+    {
+        var frames = new byte[TrayIconSizes.Length][];
+        for (int i = 0; i < TrayIconSizes.Length; i++)
+        {
+            using var bitmap = renderFrame(TrayIconSizes[i]);
+            frames[i] = EncodeIcoFrame(bitmap);
+        }
+
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream);
+
+        writer.Write((ushort)0);                 // reserved
+        writer.Write((ushort)1);                 // type: icon
+        writer.Write((ushort)frames.Length);
+
+        int offset = 6 + (16 * frames.Length);
+        for (int i = 0; i < frames.Length; i++)
+        {
+            int size = TrayIconSizes[i];
+            writer.Write((byte)(size >= 256 ? 0 : size));   // width
+            writer.Write((byte)(size >= 256 ? 0 : size));   // height
+            writer.Write((byte)0);                          // palette colours
+            writer.Write((byte)0);                          // reserved
+            writer.Write((ushort)1);                        // planes
+            writer.Write((ushort)32);                       // bits per pixel
+            writer.Write((uint)frames[i].Length);
+            writer.Write((uint)offset);
+            offset += frames[i].Length;
+        }
+
+        foreach (var frame in frames)
+        {
+            writer.Write(frame);
+        }
+
+        writer.Flush();
+        return stream.ToArray();
+    }
+
+    private static byte[] EncodeIcoFrame(SKBitmap bitmap)
+    {
+        int width = bitmap.Width;
+        int height = bitmap.Height;
+        int maskStride = ((width + 31) / 32) * 4;
+
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream);
+
+        // BITMAPINFOHEADER (height counts the XOR bitmap plus the AND mask)
+        writer.Write((uint)40);
+        writer.Write(width);
+        writer.Write(height * 2);
+        writer.Write((ushort)1);
+        writer.Write((ushort)32);
+        writer.Write((uint)0);                                          // BI_RGB
+        writer.Write((uint)((width * height * 4) + (maskStride * height)));
+        writer.Write(0);
+        writer.Write(0);
+        writer.Write((uint)0);
+        writer.Write((uint)0);
+
+        // XOR bitmap: bottom-up BGRA, straight (non-premultiplied) alpha
+        for (int y = height - 1; y >= 0; y--)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                var pixel = bitmap.GetPixel(x, y);
+                writer.Write(pixel.Blue);
+                writer.Write(pixel.Green);
+                writer.Write(pixel.Red);
+                writer.Write(pixel.Alpha);
+            }
+        }
+
+        // AND mask: bottom-up, 1 = transparent
+        var maskRow = new byte[maskStride];
+        for (int y = height - 1; y >= 0; y--)
+        {
+            Array.Clear(maskRow);
+            for (int x = 0; x < width; x++)
+            {
+                if (bitmap.GetPixel(x, y).Alpha == 0)
+                {
+                    maskRow[x / 8] |= (byte)(0x80 >> (x % 8));
+                }
+            }
+            writer.Write(maskRow);
+        }
+
+        writer.Flush();
+        return stream.ToArray();
+    }
+
     public byte[] RenderBadgePngBytes(double deltaHours, string text, int size = 64) =>
         RenderBadgePngBytes(text, GetStatusColor(deltaHours).ToString(), size);
 
@@ -291,26 +324,12 @@ public class IconRendererService : IIconRendererService
         return data.ToArray();
     }
 
-    public byte[] RenderBadgeIcoBytes(double deltaHours, string text) =>
-        RenderBadgeIcoBytes(text, GetStatusColor(deltaHours).ToString());
-
-    public byte[] RenderBadgeIcoBytes(string text, string? colorHex = null)
-    {
-        var entries = new (int size, byte[] bytes)[StandardTrayIconSizes.Length];
-        for (int i = 0; i < StandardTrayIconSizes.Length; i++)
-        {
-            int s = StandardTrayIconSizes[i];
-            entries[i] = (s, RenderBadgePngBytes(text, colorHex, s));
-        }
-        return PackIco(entries);
-    }
-
     public WindowIcon RenderBadgeWindowIcon(double deltaHours, string text, int size = 64) =>
         RenderBadgeWindowIcon(text, GetStatusColor(deltaHours).ToString(), size);
 
     public WindowIcon RenderBadgeWindowIcon(string text, string? colorHex = null, int size = 64)
     {
-        var bytes = RenderBadgeIcoBytes(text, colorHex);
+        var bytes = RenderBadgePngBytes(text, colorHex, size);
         using var stream = new MemoryStream(bytes);
         return new WindowIcon(stream);
     }
@@ -396,74 +415,130 @@ public class IconRendererService : IIconRendererService
         return data.ToArray();
     }
 
-    public byte[] RenderAlertIcoBytes(bool isCritical = false)
-    {
-        var entries = new (int size, byte[] bytes)[StandardTrayIconSizes.Length];
-        for (int i = 0; i < StandardTrayIconSizes.Length; i++)
-        {
-            int s = StandardTrayIconSizes[i];
-            entries[i] = (s, RenderAlertPngBytes(isCritical, s));
-        }
-        return PackIco(entries);
-    }
-
     public WindowIcon RenderAlertWindowIcon(bool isCritical = false, int size = 64)
     {
-        var bytes = RenderAlertIcoBytes(isCritical);
+        var bytes = RenderAlertPngBytes(isCritical, size);
         using var stream = new MemoryStream(bytes);
         return new WindowIcon(stream);
     }
 
+    private static SKBitmap? _cachedMasterIcon;
+    private static readonly object _masterLock = new();
+
+    private static SKBitmap? GetMasterAppIcon()
+    {
+        if (_cachedMasterIcon != null) return _cachedMasterIcon;
+
+        lock (_masterLock)
+        {
+            if (_cachedMasterIcon != null) return _cachedMasterIcon;
+
+            // 1. Try embedded manifest resource in assembly
+            try
+            {
+                using var resourceStream = typeof(IconRendererService).Assembly.GetManifestResourceStream("VSNAiRateTracker.Assets.icon.png");
+                if (resourceStream != null)
+                {
+                    _cachedMasterIcon = SKBitmap.Decode(resourceStream);
+                    if (_cachedMasterIcon != null) return _cachedMasterIcon;
+                }
+            }
+            catch
+            {
+                // Fallback to file system
+            }
+
+            // 2. Try file system relative to AppContext.BaseDirectory
+            try
+            {
+                var filePath = Path.Combine(AppContext.BaseDirectory, "Assets", "icon.png");
+                if (File.Exists(filePath))
+                {
+                    using var fileStream = File.OpenRead(filePath);
+                    _cachedMasterIcon = SKBitmap.Decode(fileStream);
+                    if (_cachedMasterIcon != null) return _cachedMasterIcon;
+                }
+            }
+            catch
+            {
+                // Ignore
+            }
+
+            return null;
+        }
+    }
+
     public SKBitmap RenderAppIconBitmap(int size = 64)
+    {
+        var master = GetMasterAppIcon();
+        if (master != null)
+        {
+            if (master.Width == size && master.Height == size)
+            {
+                return master.Copy();
+            }
+
+            var bitmap = new SKBitmap(size, size, SKColorType.Rgba8888, SKAlphaType.Premul);
+            using var canvas = new SKCanvas(bitmap);
+            canvas.Clear(SKColors.Transparent);
+            var destRect = new SKRect(0, 0, size, size);
+            using var paint = new SKPaint { IsAntialias = true };
+            canvas.DrawBitmap(master, destRect, new SKSamplingOptions(SKCubicResampler.CatmullRom), paint);
+            return bitmap;
+        }
+
+        // Fallback: draw official VSN logo vector squircle if master image is not found
+        return RenderFallbackVLogo(size);
+    }
+
+    private static SKBitmap RenderFallbackVLogo(int size)
     {
         var bitmap = new SKBitmap(size, size, SKColorType.Rgba8888, SKAlphaType.Premul);
         using var canvas = new SKCanvas(bitmap);
         canvas.Clear(SKColors.Transparent);
 
-        // Dark tech squircle background
-        using var bgPaint = new SKPaint
-        {
-            Color = SKColor.Parse("#0D1B2A"),
-            IsAntialias = true,
-            Style = SKPaintStyle.Fill
-        };
-        float cornerRadius = size * 0.22f;
-        canvas.DrawRoundRect(2f, 2f, size - 4f, size - 4f, cornerRadius, cornerRadius, bgPaint);
+        // VSN brand colors
+        var bg = SKColor.Parse("#1A262C");
+        var lime = SKColor.Parse("#ADC736");
+        var teal = SKColor.Parse("#008065");
+        var shadow = SKColor.Parse("#006B54");
 
-        // Tech outer glow / border
-        using var borderPaint = new SKPaint
-        {
-            Color = SKColor.Parse("#1B263B"),
-            IsAntialias = true,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = size * 0.03f
-        };
-        canvas.DrawRoundRect(2f, 2f, size - 4f, size - 4f, cornerRadius, cornerRadius, borderPaint);
+        float pad = Math.Max(1f, size * 0.02f);
+        var squircleRect = new SKRoundRect(new SKRect(pad, pad, size - pad, size - pad), size * 0.20f, size * 0.20f);
+        using var bgPaint = new SKPaint { Color = bg, IsAntialias = true, Style = SKPaintStyle.Fill };
+        canvas.DrawRoundRect(squircleRect, bgPaint);
 
-        // Modern stylized "V" with cyan-to-green gradient
-        using var shader = SKShader.CreateLinearGradient(
-            new SKPoint(size * 0.2f, size * 0.2f),
-            new SKPoint(size * 0.8f, size * 0.8f),
-            new[] { SKColor.Parse("#00F0FF"), SKColor.Parse("#2ECC71") },
-            null,
-            SKShaderTileMode.Clamp);
+        // Right wing (teal)
+        using var tealPaint = new SKPaint { Color = teal, IsAntialias = true, Style = SKPaintStyle.Fill };
+        using var rightWingBuilder = new SKPathBuilder();
+        rightWingBuilder.MoveTo(size * 0.63f, size * 0.14f);
+        rightWingBuilder.LineTo(size * 0.91f, size * 0.14f);
+        rightWingBuilder.LineTo(size * 0.60f, size * 0.91f);
+        rightWingBuilder.LineTo(size * 0.48f, size * 0.62f);
+        rightWingBuilder.Close();
+        using var rightWing = rightWingBuilder.Detach();
+        canvas.DrawPath(rightWing, tealPaint);
 
-        using var vPaint = new SKPaint
-        {
-            Shader = shader,
-            IsAntialias = true,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = size * 0.16f,
-            StrokeCap = SKStrokeCap.Round,
-            StrokeJoin = SKStrokeJoin.Round
-        };
+        // Shadow overlap
+        using var shadowPaint = new SKPaint { Color = shadow, IsAntialias = true, Style = SKPaintStyle.Fill };
+        using var shadowBuilder = new SKPathBuilder();
+        shadowBuilder.MoveTo(size * 0.50f, size * 0.67f);
+        shadowBuilder.LineTo(size * 0.64f, size * 0.91f);
+        shadowBuilder.LineTo(size * 0.35f, size * 0.91f);
+        shadowBuilder.Close();
+        using var shadowPath = shadowBuilder.Detach();
+        canvas.DrawPath(shadowPath, shadowPaint);
 
-        using var vBuilder = new SKPathBuilder();
-        vBuilder.MoveTo(size * 0.22f, size * 0.28f);
-        vBuilder.LineTo(size * 0.50f, size * 0.72f);
-        vBuilder.LineTo(size * 0.78f, size * 0.28f);
-        using var vPath = vBuilder.Detach();
-        canvas.DrawPath(vPath, vPaint);
+        // Left wing (lime)
+        using var limePaint = new SKPaint { Color = lime, IsAntialias = true, Style = SKPaintStyle.Fill };
+        using var leftWingBuilder = new SKPathBuilder();
+        leftWingBuilder.MoveTo(size * 0.08f, size * 0.14f);
+        leftWingBuilder.LineTo(size * 0.36f, size * 0.14f);
+        leftWingBuilder.LineTo(size * 0.64f, size * 0.91f);
+        leftWingBuilder.LineTo(size * 0.35f, size * 0.91f);
+        leftWingBuilder.Close();
+        using var leftWing = leftWingBuilder.Detach();
+        canvas.DrawPath(leftWing, limePaint);
 
         return bitmap;
     }
@@ -476,56 +551,10 @@ public class IconRendererService : IIconRendererService
         return data.ToArray();
     }
 
-    public byte[] RenderAppIconIcoBytes()
-    {
-        int[] appSizes = [256, 48, 32, 16];
-        var entries = new (int size, byte[] bytes)[appSizes.Length];
-        for (int i = 0; i < appSizes.Length; i++)
-        {
-            int s = appSizes[i];
-            entries[i] = (s, RenderAppIconPngBytes(s));
-        }
-        return PackIco(entries);
-    }
-
     public WindowIcon RenderAppIconWindowIcon(int size = 64)
     {
-        var bytes = RenderAppIconIcoBytes();
+        var bytes = RenderAppIconPngBytes(size);
         using var stream = new MemoryStream(bytes);
         return new WindowIcon(stream);
-    }
-
-    private static byte[] PackIco(IReadOnlyList<(int size, byte[] bytes)> entries)
-    {
-        using var ms = new MemoryStream();
-        using var writer = new BinaryWriter(ms);
-
-        // ICO Header
-        writer.Write((ushort)0); // Reserved
-        writer.Write((ushort)1); // Type 1 = Icon
-        writer.Write((ushort)entries.Count);
-
-        // Directory entries
-        int offset = 6 + (16 * entries.Count);
-        foreach (var (size, bytes) in entries)
-        {
-            writer.Write((byte)(size >= 256 ? 0 : size));
-            writer.Write((byte)(size >= 256 ? 0 : size));
-            writer.Write((byte)0); // Palette
-            writer.Write((byte)0); // Reserved
-            writer.Write((ushort)1); // Planes
-            writer.Write((ushort)32); // Bits per pixel
-            writer.Write((uint)bytes.Length);
-            writer.Write((uint)offset);
-            offset += bytes.Length;
-        }
-
-        // Image data
-        foreach (var (_, bytes) in entries)
-        {
-            writer.Write(bytes);
-        }
-
-        return ms.ToArray();
     }
 }

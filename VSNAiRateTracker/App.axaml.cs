@@ -50,7 +50,8 @@ public partial class App : Application
                 _authService,
                 openSettingsAction: () => Dispatcher.UIThread.Post(OpenSettingsWindow),
                 shutdownAction: () => Dispatcher.UIThread.Post(() => desktop.Shutdown()),
-                telemetryService: telemetryService);
+                telemetryService: telemetryService,
+                claudeCodeStatsService: new ClaudeCodeStatsService());
 
             desktop.Exit += OnExit;
 

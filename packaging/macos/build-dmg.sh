@@ -116,10 +116,22 @@ mkdir -p "${STAGING}"
 cp -R "${APP_BUNDLE}" "${STAGING}/"
 ln -s /Applications "${STAGING}/Applications"
 
-hdiutil create -volname "${APP_NAME}" \
-    -srcfolder "${STAGING}" \
-    -ov -format UDZO \
-    "${DMG_PATH}"
+# hdiutil intermittently fails with "Resource busy" on CI runners, so retry a few times
+MAX_ATTEMPTS=5
+for attempt in $(seq 1 "${MAX_ATTEMPTS}"); do
+    if hdiutil create -volname "${APP_NAME}" \
+        -srcfolder "${STAGING}" \
+        -ov -format UDZO \
+        "${DMG_PATH}"; then
+        break
+    fi
+    if [ "${attempt}" -eq "${MAX_ATTEMPTS}" ]; then
+        echo "hdiutil create failed after ${MAX_ATTEMPTS} attempts" >&2
+        exit 1
+    fi
+    echo "hdiutil create failed (attempt ${attempt}/${MAX_ATTEMPTS}), retrying..." >&2
+    sleep $((attempt * 3))
+done
 
 if [ -n "${CODESIGN_IDENTITY:-}" ]; then
     codesign --force --timestamp --sign "${CODESIGN_IDENTITY}" "${DMG_PATH}"

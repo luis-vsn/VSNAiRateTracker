@@ -186,6 +186,16 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $installerExe = Join-Path $distDir "VSNAiRateTracker-Setup-$Version-win-x64.exe"
+
+# Explorer caches icons per file path: after rebuilding the installer with a new icon it keeps showing the
+# old one. Ask the shell to refresh its icon cache so the installer shows the current application icon.
+if ($IsWindows -or $env:OS -eq "Windows_NT") {
+    try {
+        & "$env:SystemRoot\System32\ie4uinit.exe" -show 2>$null
+    } catch {
+        Write-Verbose "Could not refresh the shell icon cache: $_"
+    }
+}
 Write-Host "`n====================================================" -ForegroundColor Green
 Write-Host "Build complete! Artifacts generated:" -ForegroundColor Green
 if (Test-Path $installerExe) {

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Net;
@@ -260,6 +261,7 @@ public class AnthropicApiService : IAnthropicApiService
 
         // 5. Extract spend
         double? spendUsed = null;
+        double? spendLimit = null;
         double? spendPercent = null;
         if (root.TryGetProperty("spend", out var spend) && spend.ValueKind == JsonValueKind.Object)
         {
@@ -277,6 +279,54 @@ public class AnthropicApiService : IAnthropicApiService
                     exp = expProp.GetInt32();
                 }
                 spendUsed = minor / Math.Pow(10, exp);
+            }
+            if (spend.TryGetProperty("limit", out var limitObj) && limitObj.ValueKind == JsonValueKind.Object &&
+                limitObj.TryGetProperty("amount_minor", out var limitMinorProp) && limitMinorProp.ValueKind == JsonValueKind.Number)
+            {
+                int limitExp = 2;
+                if (limitObj.TryGetProperty("exponent", out var limitExpProp) && limitExpProp.ValueKind == JsonValueKind.Number)
+                {
+                    limitExp = limitExpProp.GetInt32();
+                }
+                spendLimit = limitMinorProp.GetDouble() / Math.Pow(10, limitExp);
+            }
+        }
+
+        // 5b. Collect every limit window generically, so new windows reach telemetry without code changes
+        var limitWindows = new List<UsageLimitWindow>();
+        foreach (var property in root.EnumerateObject())
+        {
+            if (property.Value.ValueKind == JsonValueKind.Object &&
+                property.Value.TryGetProperty("utilization", out var windowUtil) &&
+                windowUtil.ValueKind == JsonValueKind.Number)
+            {
+                limitWindows.Add(new UsageLimitWindow(property.Name, windowUtil.GetDouble(), ReadResetsAt(property.Value)));
+            }
+        }
+        if (root.TryGetProperty("limits", out var limitsArray) && limitsArray.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var limit in limitsArray.EnumerateArray())
+            {
+                if (limit.ValueKind != JsonValueKind.Object) continue;
+
+                string? name = null;
+                if (limit.TryGetProperty("kind", out var kindProp) && kindProp.ValueKind == JsonValueKind.String)
+                {
+                    name = kindProp.GetString();
+                }
+                if (string.IsNullOrWhiteSpace(name) && limit.TryGetProperty("group", out var groupProp) && groupProp.ValueKind == JsonValueKind.String)
+                {
+                    name = groupProp.GetString();
+                }
+
+                if (string.IsNullOrWhiteSpace(name) ||
+                    !limit.TryGetProperty("percent", out var limitPct) || limitPct.ValueKind != JsonValueKind.Number ||
+                    limitWindows.Exists(w => string.Equals(w.Name, name, StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                limitWindows.Add(new UsageLimitWindow(name!, limitPct.GetDouble(), ReadResetsAt(limit)));
             }
         }
 
@@ -341,7 +391,7 @@ public class AnthropicApiService : IAnthropicApiService
         }
 
         percentConsumed = Math.Clamp(percentConsumed, 0.0, 100.0);
-        return AnthropicUsageResult.Success(
+        var result = AnthropicUsageResult.Success(
             percentConsumed,
             cycleStart,
             cycleEnd,
@@ -356,9 +406,19 @@ public class AnthropicApiService : IAnthropicApiService
             extraUsageUsedCredits: extraUsedCredits,
             extraUsageMonthlyLimit: extraMonthlyLimit,
             spendUsedAmount: spendUsed,
+            spendLimitAmount: spendLimit,
             spendPercent: spendPercent,
             currency: currency);
+        result.Limits = limitWindows;
+        return result;
     }
+
+    private static DateTimeOffset? ReadResetsAt(JsonElement element) =>
+        element.TryGetProperty("resets_at", out var resetsAt) &&
+        resetsAt.ValueKind == JsonValueKind.String &&
+        DateTimeOffset.TryParse(resetsAt.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed)
+            ? parsed
+            : null;
 
     private static AnthropicUsageResult ParseSuccessfulResponse(HttpResponseMessage response)
     {

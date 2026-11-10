@@ -13,6 +13,7 @@ public class SyncOrchestrator : ISyncOrchestrator
     private readonly ITrayIconManager _trayManager;
     private readonly IAnthropicAuthService _authService;
     private readonly ITelemetryService? _telemetryService;
+    private readonly IClaudeCodeStatsService? _claudeCodeStatsService;
     private readonly Action? _openSettingsAction;
     private readonly Action? _shutdownAction;
 
@@ -28,7 +29,8 @@ public class SyncOrchestrator : ISyncOrchestrator
         IAnthropicAuthService authService,
         Action? openSettingsAction = null,
         Action? shutdownAction = null,
-        ITelemetryService? telemetryService = null)
+        ITelemetryService? telemetryService = null,
+        IClaudeCodeStatsService? claudeCodeStatsService = null)
     {
         _storageService = storageService ?? throw new ArgumentNullException(nameof(storageService));
         _apiService = apiService ?? throw new ArgumentNullException(nameof(apiService));
@@ -38,6 +40,7 @@ public class SyncOrchestrator : ISyncOrchestrator
         _openSettingsAction = openSettingsAction;
         _shutdownAction = shutdownAction;
         _telemetryService = telemetryService;
+        _claudeCodeStatsService = claudeCodeStatsService;
     }
 
     public Task StartAsync(CancellationToken cancellationToken = default)
@@ -184,6 +187,7 @@ public class SyncOrchestrator : ISyncOrchestrator
 
             sw.Stop();
             _telemetryService?.RecordUsageSync(result, usageState, sw.ElapsedMilliseconds);
+            await PublishClaudeCodeStatsAsync(cancellationToken);
             
             var fiveHourInfo = result.FiveHourUtilization.HasValue ? $", 5h: {result.FiveHourUtilization.Value:F0}%" : string.Empty;
             _telemetryService?.LogInfo($"Sincronización completada: Semanal {result.PercentConsumed:F0}% (desfase {usageState.DeltaHours:F1}h, {usageState.StatusDescription}){fiveHourInfo}");
@@ -212,6 +216,35 @@ public class SyncOrchestrator : ISyncOrchestrator
             _telemetryService?.LogError($"Error inesperado durante la sincronización: {ex.Message}", ex);
             _trayManager.SetAlert($"Error inesperado: {ex.Message}", isCritical: true);
             _telemetryService?.ForceFlush();
+        }
+    }
+
+    /// <summary>
+    /// Publishes local Claude Code activity (tokens per model, sessions, context occupancy) alongside the account metrics.
+    /// Only runs when telemetry is enabled; a failure here never affects the tray status.
+    /// </summary>
+    private async Task PublishClaudeCodeStatsAsync(CancellationToken cancellationToken)
+    {
+        if (_claudeCodeStatsService == null || _telemetryService == null || !_telemetryService.IsEnabled)
+        {
+            return;
+        }
+
+        try
+        {
+            var stats = await _claudeCodeStatsService.GetTodayStatsAsync(cancellationToken);
+            if (stats != null)
+            {
+                _telemetryService.RecordClaudeCodeStats(stats);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _telemetryService.LogWarning($"No se pudieron leer las estadísticas locales de Claude Code: {ex.Message}");
         }
     }
 
