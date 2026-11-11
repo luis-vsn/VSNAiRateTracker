@@ -58,6 +58,19 @@ public class UsageState
         }
     }
 
+    /// <summary>
+    /// Unsigned value shown in the tray icon (e.g. "0.4", "12"). The direction is conveyed by the status colour
+    /// and the signed value stays available in the tooltip.
+    /// </summary>
+    public string TrayText
+    {
+        get
+        {
+            var abs = Math.Abs(DeltaHours);
+            return abs >= 10.0 ? $"{Math.Round(abs):F0}" : $"{abs:F1}";
+        }
+    }
+
     public string StatusDescription
     {
         get

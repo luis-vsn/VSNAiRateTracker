@@ -57,6 +57,12 @@ public class IconRendererService : IIconRendererService
         return RenderBadgeBitmap(text, color.ToString(), size);
     }
 
+    /// <summary>
+    /// Renders the tray badge text in the style of LibreHardwareMonitor's tray icons: flat colour, no outline and no
+    /// horizontal squeeze, with fully hinted glyphs at a whole-pixel font size placed on whole pixels, so stems land on
+    /// the pixel grid and stay crisp at 16-24 px. The font is the largest whole-pixel size whose ink fits the full icon
+    /// width and the icon height minus a 1 px margin at the top and bottom.
+    /// </summary>
     public SKBitmap RenderBadgeBitmap(string text, string? colorHex = null, int size = 64)
     {
         var bitmap = new SKBitmap(size, size, SKColorType.Rgba8888, SKAlphaType.Premul);
@@ -69,82 +75,59 @@ public class IconRendererService : IIconRendererService
             color = parsedColor;
         }
 
-        var displayText = string.IsNullOrWhiteSpace(text) ? "+0.0" : text.Trim();
+        var displayText = string.IsNullOrWhiteSpace(text) ? "0.0" : text.Trim();
 
         using var typeface = ResolveBadgeTypeface();
-
-        // Outer dark stroke to guarantee contrast on both dark and light taskbars
-        float strokeWidth = Math.Max(1.0f, size * 0.045f);
-        using var strokePaint = new SKPaint
-        {
-            Color = new SKColor(0, 0, 0, 220),
-            IsAntialias = true,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = strokeWidth,
-            StrokeJoin = SKStrokeJoin.Round,
-            StrokeCap = SKStrokeCap.Round
-        };
-
-        using var fillPaint = new SKPaint
+        using var paint = new SKPaint
         {
             Color = color,
             IsAntialias = true,
             Style = SKPaintStyle.Fill
         };
 
-        // Strict safe bounds to guarantee ZERO clipping on left, right, top or bottom:
-        // Reserve margin for stroke and edge buffer
-        float margin = strokeWidth + (size * 0.03f);
-        float maxW = size - (2f * margin);
-        float maxH = size - (2f * margin);
+        // Full width (three-character values are width-limited, every pixel counts at 16 px);
+        // 1 px margin at the top and bottom
+        const int marginX = 0, marginY = 1;
+        int maxW = size - (2 * marginX);
+        int maxH = size - (2 * marginY);
 
-        // Measure natural proportions with reference font size (32px)
-        float refSize = 32f;
-        using var testFont = new SKFont(typeface, refSize) { Subpixel = true };
-        testFont.MeasureText(displayText, out var refBounds, fillPaint);
-        float naturalW = Math.Max(refBounds.Width, 1f);
-        float naturalH = Math.Max(refBounds.Height, 1f);
+        int fontPx = FindLargestFittingFontSize(typeface, displayText, maxW, maxH, paint);
+        using var font = CreateHintedFont(typeface, fontPx);
+        font.MeasureText(displayText, out var bounds, paint);
 
-        // If text is horizontally elongated (e.g. 4 chars like "-0.4"), allow slight condensation
-        // so height can remain tall and readable without clipping the width
-        float targetScaleH = maxH / naturalH;
-        float estWAtTargetH = naturalW * targetScaleH;
-        float scaleX = 1.0f;
-        if (estWAtTargetH > maxW)
-        {
-            scaleX = Math.Clamp(maxW / estWAtTargetH, 0.70f, 1.0f);
-        }
+        // Centre the ink box, snapped to whole pixels, and keep it inside the canvas
+        float x = MathF.Round(((size - bounds.Width) / 2f) - bounds.Left);
+        float y = MathF.Round(((size - bounds.Height) / 2f) - bounds.Top);
+        x = Math.Clamp(x, marginX - bounds.Left, Math.Max(marginX - bounds.Left, size - marginX - bounds.Right));
+        y = Math.Clamp(y, marginY - bounds.Top, Math.Max(marginY - bounds.Top, size - marginY - bounds.Bottom));
 
-        // Calculate font size that strictly honors both maxW and maxH with the chosen scaleX
-        float scale = Math.Min(maxW / (naturalW * scaleX), maxH / naturalH);
-        float finalFontSize = refSize * scale;
-
-        using var font = new SKFont(typeface, finalFontSize)
-        {
-            ScaleX = scaleX,
-            Subpixel = true
-        };
-
-        // Measure exact final ink bounds of the entire string
-        font.MeasureText(displayText, out var finalBounds, fillPaint);
-
-        // Safety check: if font metrics rounding caused overflow, shrink slightly
-        if (finalBounds.Width > maxW || finalBounds.Height > maxH)
-        {
-            float shrink = Math.Min(maxW / Math.Max(finalBounds.Width, 1f), maxH / Math.Max(finalBounds.Height, 1f));
-            font.Size *= shrink;
-            font.MeasureText(displayText, out finalBounds, fillPaint);
-        }
-
-        // Exact geometric centering of ink within canvas
-        float originX = (size / 2f) - (finalBounds.Left + (finalBounds.Width / 2f));
-        float originY = (size / 2f) - (finalBounds.Top + (finalBounds.Height / 2f));
-
-        // Draw outer stroke first, then fill on top
-        canvas.DrawText(displayText, originX, originY, SKTextAlign.Left, font, strokePaint);
-        canvas.DrawText(displayText, originX, originY, SKTextAlign.Left, font, fillPaint);
-
+        canvas.DrawText(displayText, x, y, SKTextAlign.Left, font, paint);
         return bitmap;
+    }
+
+    private static SKFont CreateHintedFont(SKTypeface typeface, int sizePx) => new(typeface, sizePx)
+    {
+        Hinting = SKFontHinting.Full,
+        Edging = SKFontEdging.Antialias,
+        Subpixel = false
+    };
+
+    /// <summary>Largest whole-pixel font size whose ink bounds fit in <paramref name="maxW"/> x <paramref name="maxH"/>.</summary>
+    private static int FindLargestFittingFontSize(SKTypeface typeface, string text, int maxW, int maxH, SKPaint paint)
+    {
+        const int minPx = 4;
+        int lo = minPx, hi = Math.Max(minPx, maxH * 2);
+        while (lo < hi)
+        {
+            int mid = (lo + hi + 1) / 2;
+            using var probe = CreateHintedFont(typeface, mid);
+            probe.MeasureText(text, out var b, paint);
+            if (b.Width <= maxW && b.Height <= maxH)
+                lo = mid;
+            else
+                hi = mid - 1;
+        }
+        return lo;
     }
 
     // DIN-1451 style faces first for high-legibility dial digits: Bahnschrift (Windows), DIN Alternate (macOS)

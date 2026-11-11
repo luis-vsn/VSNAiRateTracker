@@ -111,7 +111,7 @@ public class TrayIconManager : ITrayIconManager
 
             try
             {
-                _trayIcon.Icon = _iconRenderer.RenderTrayBadgeIcon(state.ShortText, state.StatusColorHex);
+                _trayIcon.Icon = _iconRenderer.RenderTrayBadgeIcon(state.TrayText, state.StatusColorHex);
                 _trayIcon.ToolTipText = state.TooltipText;
             }
             catch

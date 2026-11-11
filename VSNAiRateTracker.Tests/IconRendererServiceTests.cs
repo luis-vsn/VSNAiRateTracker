@@ -64,7 +64,8 @@ public class IconRendererServiceTests
         // Thresholds are calibrated for Bahnschrift, which only ships with Windows
         if (!OperatingSystem.IsWindows()) return;
 
-        using var bitmap = _sut.RenderBadgeBitmap("+0.2", "#2ECC71", 64);
+        // The tray shows the unsigned value (UsageState.TrayText)
+        using var bitmap = _sut.RenderBadgeBitmap("0.2", "#2ECC71", 64);
 
         int minX = 64, maxX = 0, minY = 64, maxY = 0;
         for (int y = 0; y < 64; y++)
@@ -108,13 +109,45 @@ public class IconRendererServiceTests
         state.FormattedDelta.Should().Be(expectedFormatted);
     }
 
+    [Theory]
+    [InlineData(0.0, "0.0")]
+    [InlineData(0.4, "0.4")]
+    [InlineData(-0.4, "0.4")]
+    [InlineData(-9.9, "9.9")]
+    [InlineData(12.4, "12")]
+    [InlineData(-15.7, "16")]
+    public void UsageState_TrayText_IsUnsignedAndFollowsThresholdRules(double delta, string expected)
+    {
+        var state = new Models.UsageState { DeltaHours = delta };
+        state.TrayText.Should().Be(expected);
+    }
+
     [Fact]
-    public void RenderBadgeBitmap_ForNegativeDecimal_GeneratesTallCompactDigits()
+    public void RenderBadgeBitmap_DrawsFlatStatusColourWithoutDarkOutline()
+    {
+        using var bitmap = _sut.RenderBadgeBitmap("0.4", "#2ECC71", 24);
+
+        for (int y = 0; y < bitmap.Height; y++)
+        {
+            for (int x = 0; x < bitmap.Width; x++)
+            {
+                var p = bitmap.GetPixel(x, y);
+                if (p.Alpha < 64) continue;
+                // Every visible pixel keeps the status colour (only coverage varies): no black halo
+                p.Red.Should().BeCloseTo(0x2E, 3);
+                p.Green.Should().BeCloseTo(0xCC, 3);
+                p.Blue.Should().BeCloseTo(0x71, 3);
+            }
+        }
+    }
+
+    [Fact]
+    public void RenderBadgeBitmap_ForUnsignedDecimal_GeneratesTallCompactDigits()
     {
         // Thresholds are calibrated for Bahnschrift, which only ships with Windows
         if (!OperatingSystem.IsWindows()) return;
 
-        using var bitmap = _sut.RenderBadgeBitmap("-0.4", "#2ECC71", 64);
+        using var bitmap = _sut.RenderBadgeBitmap("9.9", "#2ECC71", 64);
         int minX = 64, maxX = 0, minY = 64, maxY = 0;
         for (int y = 0; y < 64; y++)
         {
@@ -217,7 +250,6 @@ public class IconRendererServiceTests
     [InlineData("+0.0")]
     [InlineData("+100")]
     [InlineData("-120")]
-    [InlineData("...")]
     [InlineData("ERR")]
     public void RenderBadgeBitmap_NeverClipsOnRightOrLeftEdges(string text)
     {
@@ -242,9 +274,8 @@ public class IconRendererServiceTests
             }
         }
 
-        // Must not touch the canvas boundary - guarantees no clipping on any edge
-        maxX.Should().BeLessThan(size, $"Right edge of text '{text}' must not be clipped");
-        minX.Should().BeGreaterThan(0, $"Left edge of text '{text}' must not be clipped");
+        // May use the full width (no outline any more) but must stay centred and never be clipped vertically
+        Math.Abs(minX - (size - 1 - maxX)).Should().BeLessThanOrEqualTo(2, $"Text '{text}' must be horizontally centred");
         maxY.Should().BeLessThan(size, $"Bottom edge of text '{text}' must not be clipped");
         minY.Should().BeGreaterThan(0, $"Top edge of text '{text}' must not be clipped");
 
@@ -297,7 +328,7 @@ public class IconRendererServiceTests
     [InlineData("+12")]
     [InlineData("-120")]
     [InlineData("...")]
-    public void RenderBadgeBitmap_AtEveryTraySize_DrawsTextWithoutTouchingTheEdges(string text)
+    public void RenderBadgeBitmap_AtEveryTraySize_DrawsCentredTextWithoutVerticalClipping(string text)
     {
         foreach (var size in IconRendererService.TrayIconSizes)
         {
@@ -319,8 +350,9 @@ public class IconRendererServiceTests
             }
 
             maxX.Should().BeGreaterThan(-1, $"'{text}' must be drawn at {size}px");
-            minX.Should().BeGreaterThan(0, $"left edge of '{text}' must not be clipped at {size}px");
-            maxX.Should().BeLessThan(size - 1, $"right edge of '{text}' must not be clipped at {size}px");
+            // Text may use the full width but must stay horizontally centred (no one-sided clipping)
+            int leftGap = minX, rightGap = size - 1 - maxX;
+            Math.Abs(leftGap - rightGap).Should().BeLessThanOrEqualTo(2, $"'{text}' must be horizontally centred at {size}px");
             minY.Should().BeGreaterThan(0, $"top edge of '{text}' must not be clipped at {size}px");
             maxY.Should().BeLessThan(size - 1, $"bottom edge of '{text}' must not be clipped at {size}px");
         }
