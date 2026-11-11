@@ -143,12 +143,21 @@ jobs:
       with:
         path: artifacts
         merge-multiple: true
+        # Artifacts are uploaded unzipped (archive: false). Without this, a raw .zip artifact
+        # (the portable package) would be extracted and its contents attached to the release.
+        skip-decompress: true
 
-    - name: List release files
-      run: ls -la artifacts
+    - name: Verify release files
+      run: |
+        ls -la artifacts
+        ls artifacts/VSNAiRateTracker-Setup-*-win-x64.exe >/dev/null
+        ls artifacts/VSNAiRateTracker-*-win-x64-portable.zip >/dev/null
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       with:
         generate_release_notes: true
-        files: artifacts/*
+        files: |
+          artifacts/*.exe
+          artifacts/*.zip
+          artifacts/*.dmg
