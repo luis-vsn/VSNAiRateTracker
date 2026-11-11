@@ -141,7 +141,7 @@ public class TelemetryService : ITelemetryService
                 var logsUri = ResolveSignalEndpoint(endpoint, "v1/logs");
 
                 var machineName = Environment.MachineName;
-                var appVersion = typeof(TelemetryService).Assembly.GetName().Version?.ToString(3) ?? "0.0.2";
+                var appVersion = typeof(TelemetryService).Assembly.GetName().Version?.ToString() ?? "0.0.0.0";
 
                 var resourceBuilder = ResourceBuilder.CreateDefault()
                     .AddService(serviceName, serviceVersion: appVersion, serviceInstanceId: machineName)

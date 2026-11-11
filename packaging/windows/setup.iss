@@ -2,7 +2,9 @@
 ; VSN AI Rate Tracker Windows Installer
 
 #define MyAppName "VSN AI Rate Tracker"
-#define MyAppVersion "0.0.2"
+#ifndef MyAppVersion
+  #define MyAppVersion "0.0.0.0"
+#endif
 #define MyAppPublisher "VSN"
 #define MyAppURL "https://github.com/luis-vsn/VSNAiRateTracker"
 #define MyAppExeName "VSNAiRateTracker.exe"

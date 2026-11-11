@@ -1,0 +1,25 @@
+<Project>
+  <!-- Derive Version from the latest "vX.Y.Z" git tag when it was not passed explicitly. -->
+  <Target Name="ResolveVersionFromGitTag"
+          BeforeTargets="GetAssemblyVersion"
+          Condition="'$(_VersionWasProvided)' != 'true'">
+    <Exec Command="git describe --tags --abbrev=0 --match &quot;v[0-9]*&quot;"
+          WorkingDirectory="$(MSBuildThisFileDirectory)"
+          ConsoleToMSBuild="true"
+          IgnoreExitCode="true"
+          IgnoreStandardErrorWarningFormat="true"
+          StandardOutputImportance="low"
+          StandardErrorImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitLatestTag" />
+      <Output TaskParameter="ExitCode" PropertyName="_GitExitCode" />
+    </Exec>
+
+    <PropertyGroup>
+      <_GitBaseVersion Condition="'$(_GitExitCode)' == '0'">$(_GitLatestTag.Trim().Substring(1))</_GitBaseVersion>
+      <_GitBaseVersion Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(_GitBaseVersion)', '^\d+\.\d+\.\d+$'))">0.0.0</_GitBaseVersion>
+      <Version>$(_GitBaseVersion).$(BuildNumber)</Version>
+    </PropertyGroup>
+
+    <Message Importance="normal" Text="$(MSBuildProjectName) version: $(Version)" />
+  </Target>
+</Project>

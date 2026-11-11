@@ -1,6 +1,14 @@
 <Project>
   <PropertyGroup>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!--
+      Versioning: MAJOR.MINOR.PATCH.BUILD
+        - MAJOR.MINOR.PATCH comes from the latest git tag "vX.Y.Z" (see Directory.Build.targets).
+        - BUILD is the CI build number (github.run_number); 0 for local development builds.
+      Passing -p:Version=X.Y.Z.N explicitly (as CI and the packaging scripts do) skips the git lookup.
+    -->
+    <BuildNumber Condition="'$(BuildNumber)' == ''">0</BuildNumber>
+    <_VersionWasProvided Condition="'$(Version)' != ''">true</_VersionWasProvided>
   </PropertyGroup>
 </Project>
-

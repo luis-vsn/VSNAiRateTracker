@@ -2,6 +2,8 @@
 # VSN AI Rate Tracker - macOS App Bundle & DMG Builder Script
 #
 # Usage: build-dmg.sh [Configuration] [Version] [Runtime]
+#   Version: MAJOR.MINOR.PATCH.BUILD. When empty/omitted it is derived from the latest "vX.Y.Z"
+#            git tag with BUILD = 0 (local development builds).
 #   Runtime: osx-arm64 (Apple Silicon, default) | osx-x64 (Intel)
 #
 # Code signing (optional, via environment):
@@ -13,7 +15,7 @@
 set -euo pipefail
 
 CONFIGURATION="${1:-Release}"
-VERSION="${2:-0.0.2}"
+VERSION="${2:-}"
 RUNTIME="${3:-osx-arm64}"
 
 case "${RUNTIME}" in
@@ -23,6 +25,20 @@ esac
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
+if [[ -z "${VERSION}" ]]; then
+    BASE_VERSION="0.0.0"
+    LATEST_TAG="$(git -C "${ROOT_DIR}" describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)"
+    if [[ "${LATEST_TAG}" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+        BASE_VERSION="${BASH_REMATCH[1]}"
+    fi
+    VERSION="${BASE_VERSION}.0"
+fi
+if ! [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "ERROR: invalid version '${VERSION}' (expected MAJOR.MINOR.PATCH.BUILD)" >&2; exit 1
+fi
+# CFBundleShortVersionString must be MAJOR.MINOR.PATCH; CFBundleVersion carries the full build version.
+SHORT_VERSION="${VERSION%.*}"
 PROJECT_PATH="${ROOT_DIR}/VSNAiRateTracker/VSNAiRateTracker.csproj"
 DIST_DIR="${ROOT_DIR}/packaging/dist"
 APP_NAME="VSN AI Rate Tracker"
@@ -61,7 +77,7 @@ rm -f "${APP_BUNDLE}/Contents/MacOS/Info.plist" "${APP_BUNDLE}/Contents/MacOS/"*
 chmod +x "${APP_BUNDLE}/Contents/MacOS/VSNAiRateTracker"
 
 cp "${ROOT_DIR}/VSNAiRateTracker/Info.plist" "${APP_BUNDLE}/Contents/Info.plist"
-plutil -replace CFBundleShortVersionString -string "${VERSION}" "${APP_BUNDLE}/Contents/Info.plist"
+plutil -replace CFBundleShortVersionString -string "${SHORT_VERSION}" "${APP_BUNDLE}/Contents/Info.plist"
 plutil -replace CFBundleVersion -string "${VERSION}" "${APP_BUNDLE}/Contents/Info.plist"
 plutil -lint "${APP_BUNDLE}/Contents/Info.plist" >/dev/null
 

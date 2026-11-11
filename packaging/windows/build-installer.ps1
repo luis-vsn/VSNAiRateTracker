@@ -2,7 +2,9 @@
 [CmdletBinding()]
 param(
     [string]$Configuration = "Release",
-    [string]$Version = "0.0.2",
+    # Full version MAJOR.MINOR.PATCH.BUILD. When omitted it is derived from the latest
+    # "vX.Y.Z" git tag with BUILD = 0 (local development builds).
+    [string]$Version = "",
     [string]$TelemetryEndpoint = "",
     [string]$TelemetryHeaders = "",
     [switch]$SkipInstaller
@@ -15,6 +17,18 @@ $rootDir = Resolve-Path (Join-Path $scriptDir "..\..")
 $projectPath = Join-Path $rootDir "VSNAiRateTracker\VSNAiRateTracker.csproj"
 $publishDir = Join-Path $scriptDir "publish"
 $distDir = Join-Path $rootDir "packaging\dist"
+
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $baseVersion = "0.0.0"
+    $latestTag = (& git -C $rootDir describe --tags --abbrev=0 --match "v[0-9]*" 2>$null)
+    if ($LASTEXITCODE -eq 0 -and "$latestTag".Trim() -match '^v(\d+\.\d+\.\d+)$') {
+        $baseVersion = $Matches[1]
+    }
+    $Version = "$baseVersion.0"
+}
+if ($Version -notmatch '^\d+\.\d+\.\d+\.\d+$') {
+    throw "Invalid version '$Version'. Expected MAJOR.MINOR.PATCH.BUILD (e.g. 0.0.2.0)."
+}
 
 Write-Host "====================================================" -ForegroundColor Cyan
 Write-Host "Building VSN AI Rate Tracker Windows Installer ($Version)" -ForegroundColor Cyan
