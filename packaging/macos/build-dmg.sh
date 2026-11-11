@@ -82,7 +82,7 @@ if [ -n "${TEL_ENDPOINT}" ] && [ -n "${TEL_HEADERS}" ]; then
     plutil -insert Telemetry.Protocol -string "HttpProtobuf" "${DEFAULTS_PLIST}"
     plutil -convert json "${DEFAULTS_PLIST}" -o "${DEFAULTS_TEMP_JSON}"
     "${APP_BUNDLE}/Contents/MacOS/VSNAiRateTracker" --encrypt-defaults "${DEFAULTS_TEMP_JSON}" "${DEFAULTS_ENC}"
-    rm -f "${DEFAULTS_TEMP_JSON}" "${APP_BUNDLE}/Contents/MacOS/defaults.json"
+    rm -f "${DEFAULTS_TEMP_JSON}"
     echo "    Injected encrypted bundled telemetry defaults (defaults.enc)."
 fi
 

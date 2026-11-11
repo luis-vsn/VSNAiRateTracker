@@ -134,8 +134,6 @@ if (-not [string]::IsNullOrWhiteSpace($endpoint) -and -not [string]::IsNullOrWhi
     }
     $defaultsJson = $defaultsObj | ConvertTo-Json -Depth 5
     $defaultsEncFile = Join-Path $publishDir "defaults.enc"
-    $plainDefaultsFile = Join-Path $publishDir "defaults.json"
-    if (Test-Path $plainDefaultsFile) { Remove-Item $plainDefaultsFile -Force }
 
     $hasAesGcm = $false
     try { [void][System.Security.Cryptography.AesGcm]; $hasAesGcm = $true } catch { }

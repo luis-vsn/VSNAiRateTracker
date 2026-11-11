@@ -11,7 +11,6 @@ public static class BundledDefaultsCrypto
     private const int NonceSize = 12;
     private const int TagSize = 16;
     public const string EncryptedFileName = "defaults.enc";
-    public const string PlaintextFileName = "defaults.json";
 
     // Application seed for bundled defaults encryption
     private static readonly byte[] EncryptionKey = SHA256.HashData(

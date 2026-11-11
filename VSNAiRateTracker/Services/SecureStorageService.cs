@@ -202,14 +202,9 @@ public class SecureStorageService : ISecureStorageService
         else if (string.IsNullOrWhiteSpace(_defaultsFilePath))
         {
             var encPath = Path.Combine(AppContext.BaseDirectory, BundledDefaultsCrypto.EncryptedFileName);
-            var jsonPath = Path.Combine(AppContext.BaseDirectory, BundledDefaultsCrypto.PlaintextFileName);
             if (File.Exists(encPath))
             {
                 resolvedPath = encPath;
-            }
-            else if (File.Exists(jsonPath))
-            {
-                resolvedPath = jsonPath;
             }
         }
 
@@ -221,16 +216,7 @@ public class SecureStorageService : ISecureStorageService
         try
         {
             var bytes = File.ReadAllBytes(resolvedPath);
-            string json;
-            if (resolvedPath.EndsWith(".enc", StringComparison.OrdinalIgnoreCase) ||
-                (bytes.Length >= 29 && bytes[0] == 0x01 && !IsJsonStart(bytes)))
-            {
-                json = BundledDefaultsCrypto.Decrypt(bytes);
-            }
-            else
-            {
-                json = System.Text.Encoding.UTF8.GetString(bytes);
-            }
+            var json = BundledDefaultsCrypto.Decrypt(bytes);
 
             using var doc = JsonDocument.Parse(json);
             if (doc.RootElement.TryGetProperty("Telemetry", out var telProp) && telProp.ValueKind == JsonValueKind.Object)
@@ -263,19 +249,6 @@ public class SecureStorageService : ISecureStorageService
         {
             // Silently ignore corrupted or unreadable defaults
         }
-    }
-
-    private static bool IsJsonStart(byte[] bytes)
-    {
-        foreach (var b in bytes)
-        {
-            if (b is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n')
-            {
-                continue;
-            }
-            return b is (byte)'{' or (byte)'[';
-        }
-        return false;
     }
 
     private static void ApplyUnixSecurePermissions(string path)

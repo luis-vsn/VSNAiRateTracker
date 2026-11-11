@@ -165,7 +165,7 @@ public class SecureStorageServiceTests : IDisposable
     public async Task LoadConfig_WithBundledDefaults_AppliesTelemetryDefaultsWhenNotConfigured()
     {
         // Arrange
-        var defaultsFile = Path.Combine(_tempDirectory, "test-defaults.json");
+        var defaultsFile = Path.Combine(_tempDirectory, "test-defaults.enc");
         var defaultsJson = """
         {
           "Telemetry": {
@@ -177,7 +177,8 @@ public class SecureStorageServiceTests : IDisposable
           }
         }
         """;
-        await File.WriteAllTextAsync(defaultsFile, defaultsJson);
+        var encryptedBytes = BundledDefaultsCrypto.Encrypt(defaultsJson);
+        await File.WriteAllBytesAsync(defaultsFile, encryptedBytes);
 
         var service = new SecureStorageService(_tempDirectory, _keyProtection, defaultsFilePath: defaultsFile);
 
@@ -198,7 +199,7 @@ public class SecureStorageServiceTests : IDisposable
     public async Task LoadConfig_WithBundledDefaults_DoesNotOverwriteExistingUserConfig()
     {
         // Arrange
-        var defaultsFile = Path.Combine(_tempDirectory, "test-defaults.json");
+        var defaultsFile = Path.Combine(_tempDirectory, "test-defaults.enc");
         var defaultsJson = """
         {
           "Telemetry": {
@@ -208,7 +209,8 @@ public class SecureStorageServiceTests : IDisposable
           }
         }
         """;
-        await File.WriteAllTextAsync(defaultsFile, defaultsJson);
+        var encryptedBytes = BundledDefaultsCrypto.Encrypt(defaultsJson);
+        await File.WriteAllBytesAsync(defaultsFile, encryptedBytes);
 
         var service = new SecureStorageService(_tempDirectory, _keyProtection, defaultsFilePath: defaultsFile);
 
